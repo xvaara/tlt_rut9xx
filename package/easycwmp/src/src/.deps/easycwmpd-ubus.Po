@@ -1,0 +1,250 @@
+../src/easycwmpd-ubus.o: ../src/ubus.c \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/unistd.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/features.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_config.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/cdefs.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/posix_opt.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/environments.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/wordsize.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/types.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stddef.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/typesizes.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/pthreadtypes.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/endian.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/endian.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/byteswap.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/byteswap.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/byteswap-common.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sgidefs.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/confname.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/getopt.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubus.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/avl.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdbool.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/list.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/list.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blobmsg.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdarg.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blob.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdlib.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/waitflags.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/waitstatus.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/types.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/time.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/select.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/select.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigset.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/time.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/sysmacros.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/alloca.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdint.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdint.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/wchar.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/string.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdio.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_stdio.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/wchar.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_mutex.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/pthread.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sched.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sched.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_clk_tck.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/signal.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/setjmp.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_pthread.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/stdio_lim.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/errno.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/errno.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/linux/errno.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/asm/errno.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/asm-generic/errno-base.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/utils.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/time.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/uloop.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/signum.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/siginfo.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigaction.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigcontext.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigstack.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/ucontext.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigthread.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/ubusmsg.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blob.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/ubus_common.h \
+ ../src/ubus.h ../src/config.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/uci.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/uci_config.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/setjmp.h \
+ ../src/easycwmp.h ../src/cwmp.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/microxml.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/ctype.h \
+ /home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_touplow.h \
+ ../src/external.h ../src/log.h
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/unistd.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/features.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_config.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/cdefs.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/posix_opt.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/environments.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/wordsize.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/types.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stddef.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/typesizes.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/pthreadtypes.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/endian.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/endian.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/byteswap.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/byteswap.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/byteswap-common.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sgidefs.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/confname.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/getopt.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubus.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/avl.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdbool.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/list.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/list.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blobmsg.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdarg.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blob.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdlib.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/waitflags.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/waitstatus.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/types.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/time.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/select.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/select.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigset.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/time.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/sysmacros.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/alloca.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/lib/gcc/mips-openwrt-linux-uclibc/4.8.3/include/stdint.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdint.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/wchar.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/string.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/stdio.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_stdio.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/wchar.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_mutex.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/pthread.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sched.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sched.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_clk_tck.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/signal.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/setjmp.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_pthread.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/stdio_lim.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/errno.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/errno.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/linux/errno.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/asm/errno.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/asm-generic/errno-base.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/utils.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/time.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/uloop.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/signum.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/siginfo.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigaction.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigcontext.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigstack.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/sys/ucontext.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/sigthread.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/ubusmsg.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/libubox/blob.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/ubus_common.h:
+
+../src/ubus.h:
+
+../src/config.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/uci.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/uci_config.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/setjmp.h:
+
+../src/easycwmp.h:
+
+../src/cwmp.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/target-mips_34kc_uClibc-0.9.33.2/usr/include/microxml.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/ctype.h:
+
+/home/gintas/projects/rut900_wrt/staging_dir/toolchain-mips_34kc_gcc-4.8-linaro_uClibc-0.9.33.2/include/bits/uClibc_touplow.h:
+
+../src/external.h:
+
+../src/log.h:

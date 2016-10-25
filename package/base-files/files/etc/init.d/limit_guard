@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+START=76
+STOP=39
+
+start () {
+	#local enabled=`uci get mdcollectd.config.enabled`
+	#if [ "$enabled" = "1" ]; then
+		/usr/bin/limit_guard start &
+	#fi
+}
+
+stop () {
+	/usr/bin/limit_guard stop
+}
+
+restart () {
+	/usr/bin/limit_guard restart &
+}
+
+status () {
+	/usr/bin/limit_guard status
+} 

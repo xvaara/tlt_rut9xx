@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "purge" ] ; then
+        deluser --quiet --system --remove-home shellinabox > /dev/null || true
+        delgroup --quiet --system shellinabox > /dev/null || true
+fi

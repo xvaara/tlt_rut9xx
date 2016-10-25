@@ -1,0 +1,36 @@
+<%+header%>
+<%
+local uci = require "luci.model.uci".cursor()
+luci.util   = require "luci.util"
+local port = uci:get("cli", "status", "port")
+luci.sys.call("/etc/init.d/shellinabox start")
+luci.sys.exec("sleep 2")
+%>
+<br>
+<div id="cli_iframe">
+</div>
+<br>
+<div id="descr" style="width:100%;">Use "CTRL + ALT + SHIFT + T" keyboard shortcut to open CLI in new tab </div>
+<script>
+	port = <%=port%>
+	url = window.location.href;
+	if( url.indexOf("proxy") > -1 || url.indexOf("monitoring") > -1){
+		temp_url = "";
+		counter = 0;
+		for(i = 0; i < url.length ; i++){
+			if(url[i] == "%"){
+				counter++;
+				if(counter == 4){
+					break;
+				}
+			}
+			temp_url += url[i];
+		}
+		document.getElementById("cli_iframe").innerHTML = '<iframe style="width:100%;height:400px"src="'+temp_url+':'+port+'" onclick="makeFrame()"></iframe> ';
+	}else{
+		ip=window.location.hostname
+		document.getElementById("cli_iframe").innerHTML = '<iframe style="width:100%;height:400px"src="http://'+ip+':'+port+'" onclick="makeFrame()"></iframe> ';
+	}
+</script>
+<%+footer%>
+

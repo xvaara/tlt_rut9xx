@@ -1,0 +1,116 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008-2011 Jo-Philipp Wich <xm@subsignal.org>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: index.htm 8408 2012-04-02 22:50:26Z jow $
+
+-%>
+
+<%
+	require "luci.fs"
+	require "luci.tools.status"
+	luci.util   = require "luci.util"
+
+	local function cecho(string)
+		luci.sys.call("echo \"" .. string .. "\" >> /tmp/log.log")
+	end
+
+	if luci.http.formvalue("status") == "1" then
+		local status, virtual_ip, priority, router, master_ip
+			
+		if tonumber(luci.sys.exec("ps -w | grep '/usr/sbin/vrrpd' | grep -v grep | grep -c 'br-lan'")) > 0 then
+			status = true
+			virtual_ip = luci.util.trim(luci.sys.exec("uci -q get vrrpd.vid1.virtual_ip"))
+			priority = luci.util.trim(luci.sys.exec("uci -q get vrrpd.vid1.priority"))
+			
+			vrrpdlog = tostring(luci.sys.exec("cat /tmp/vrrpd_lan_log"))
+			line = vrrpdlog:split("\n")
+			router = line[1]
+			if line[2] ~= "" then
+				ip = line[2]:split(".")
+				if tonumber(ip[4]) == 0 and tonumber(ip[3]) == 0 and tonumber(ip[2]) == 0 and tonumber(ip[1]) == 0  then
+					master_ip = "N/A"
+				else
+					master_ip = ip[4].."."..ip[3].."."..ip[2].."."..ip[1]
+				end
+			else
+				master_ip = "N/A"
+			end
+		else
+			status = false
+		end
+
+		local rv = {
+			status = status,
+			virtual_ip = virtual_ip,
+			priority = priority,
+			router = router,
+			master_ip = master_ip,
+		}
+		luci.http.prepare_content("application/json")
+		luci.http.write_json(rv)
+
+		return
+	end
+
+	local system, model = luci.sys.sysinfo()
+-%>
+
+<%+header%>
+<script type="text/javascript">
+
+</script>
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">
+function refreshPage(){
+	document.getElementById("refresh").disabled = true;
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "netinfo", "vrrp")%>', { status: 1 },
+		function(x, info)
+		{
+			if (!info && x.responseText.search("UnikalusTekstinisStringasKitoTokioNiekurNera") != -1){
+				location.href=location.href;
+			}
+			if(info.status == false){
+				s = '<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("VRRP status")%>\')" onmouseout="HideHint(this)" ><%=translate("Status")%></td><td>Disabled</td></tr>';
+			}else{
+				s = '<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("VRRP status")%>\')" onmouseout="HideHint(this)" ><%=translate("Status")%></td><td>Enabled</td></tr>';
+				s += String.format('<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("")%>\')" onmouseout="HideHint(this)"><%=translate("Virtual ip")%></td><td>%s</td></tr>' +
+									'<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("")%>\')" onmouseout="HideHint(this)"><%=translate("Priority")%></td><td>%s</td></tr>' +
+									'<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("")%>\')" onmouseout="HideHint(this)"><%=translate("Router")%></td><td>%s</td></tr>'
+									,info.virtual_ip , info.priority, info.router);
+				if(info.router != "Master"){
+					s += String.format('<tr><td width="33%%" onmouseover="ShowHint(this, \'<%=translate("")%>\')" onmouseout="HideHint(this)"><%=translate("Master ip")%></td><td>%s</td></tr>'
+										, info.master_ip);
+				}
+			}
+			ws = document.getElementById('vrrp_status');
+			ws.innerHTML = '<table id="vrrp_status_table" width="100%" cellspacing="10" class="cbi-section-table">' + s + '</table>';
+			document.getElementById('refresh').disabled = false;
+		}
+	);
+}
+AddWindowOnLoadEvent(refreshPage);
+</script>
+
+<h2><a id="content" name="content"><%=translate("VRRP Information")%></a></h2>
+<fieldset class="cbi-section">
+	<div id="vrrpBarsShow" class="overlayParent">
+		<div class="overlayLegend"><%=translate("VRRP LAN Status")%></div>
+	</div>
+	<div id="vrrp_status">
+		<table id="vrrp_status_table" width="100%" cellspacing="10">
+			<tr><td><em><%=translate("Collecting data...")%></em></td></tr>
+		</table>
+	</div>
+</fieldset>
+<fieldset class="cbi-section">
+    <button id="refresh" class="cbi-button-refresh"  style="float: right;" disabled onClick="refreshPage()"><%=translate("Refresh")%></button>
+</fieldset>
+<%+footer%>

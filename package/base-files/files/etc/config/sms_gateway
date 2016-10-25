@@ -1,0 +1,13 @@
+config post_get 'post_get'
+	option enabled '0'
+
+config pop3 'pop3'
+	option enabled '0'
+	option ssl '0'
+
+config sms_gateway 'forwarding_to_http'
+
+config sms_gateway 'forwarding_to_sms'
+
+config sms_gateway 'forwarding_to_smtp'
+

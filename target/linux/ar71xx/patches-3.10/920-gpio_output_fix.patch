@@ -1,0 +1,13 @@
+--- a/arch/mips/ath79/gpio.c
++++ b/arch/mips/ath79/gpio.c
+@@ -197,6 +197,10 @@
+ 
+ 	spin_lock_irqsave(&ath79_gpio_lock, flags);
+ 
++	t = __raw_readl(base);
++	t &= ~(1 << gpio);
++	__raw_writel(t, base );
++
+ 	t = __raw_readl(base + reg);
+ 	t &= ~(0xff << s);
+ 	t |= val << s;

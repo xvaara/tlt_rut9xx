@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+
+# Copyright (C) 2014 Teltonika
+
+#. /lib/teltonika-functions.sh
+ 
+START=99
+STOP=10
+
+start() {
+	killall -9 auto_update.sh >/dev/null 2>&1
+	/usr/sbin/auto_update.sh init&
+}
+
+stop() {
+	killall -9 auto_update.sh >/dev/null 2>&1
+}

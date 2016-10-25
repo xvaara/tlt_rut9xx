@@ -1,0 +1,31 @@
+#!/bin/sh
+
+define_modem_restart() {
+	#Init modem pins
+	/sbin/gpio.sh "export" MON
+	/sbin/gpio.sh "dirout" MON
+	/sbin/gpio.sh "export" MRST
+	/sbin/gpio.sh "dirout" MRST
+	/sbin/gpio.sh "export" SIM
+	/sbin/gpio.sh "dirout" SIM
+
+
+	#Reset
+	/sbin/gpio.sh clear MON
+	#Power off
+	/sbin/gpio.sh set MRST
+
+	#SIM
+	if [ `uci -q get simcard.simcard.default` = "sim2" ]; then
+		/sbin/gpio.sh clear SIM
+	else
+		/sbin/gpio.sh set SIM
+	fi
+
+	#Clear reset
+	/sbin/gpio.sh set MON
+	#Power on
+	/sbin/gpio.sh clear MRST
+}
+
+boot_hook_add preinit_main define_modem_restart

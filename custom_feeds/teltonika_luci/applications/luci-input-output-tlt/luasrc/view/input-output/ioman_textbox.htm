@@ -1,0 +1,46 @@
+<%
+	Value = luci.util.trim(luci.sys.exec("uci get -q "..self.config.."."..self.indicator.."."..self.option))
+	does_exist = tonumber(luci.sys.exec("uci get -q "..self.config.."."..self.indicator.."."..self.option.." ; echo $?"))
+	if does_exist == 1 then
+		Value = self.default
+	else
+		Value = luci.sys.exec("uci get -q "..self.config.."."..self.indicator.."."..self.option)
+	end
+	if Value == " \n"then
+		Value = ""
+	end
+%>
+<%+cbi/valueheader%>
+	<% if self:cfgvalue(section) ~= false then %>
+	<head>
+		<style>
+			table td{border:none; padding: 0px 0px 0px 10px; line-height: 13px; font-size: 12px; width: 50%; color: #808080; text-align:justify;}
+		</style>
+	</head>
+	<fieldset class="cbi-section">
+		<div style="display: inline; ">
+		<div>
+		<textarea style="float: left; resize: none;" id="cbid.ioman.<%=self.indicator%>.<%=self.option%>" name="cbid.ioman.<%=self.indicator%>.<%=self.option%>"rows="<%=self.rows%>"><%=Value%></textarea>
+		</div>
+		<div>
+		<table style="width:55%; float: left;" border="0">
+			<tr>
+				<td><%=translate("Digital input - %di")%></td>
+			<tr>
+				<td><%=translate("Digital isolated input - %ii")%></td>
+			<tr>
+				<td><%=translate("Analog input - %ai")%></td>
+			<tr>
+				<td><%=translate("Analog min voltage - %an")%></td>
+			<tr>
+				<td><%=translate("Analog max voltage - %ax")%></td>
+			<tr>
+				<td><%=translate("New line - %nl")%></td>
+		</table>
+		</div>
+		</div>
+	</fieldset>
+	<% else %>
+		-
+	<% end %>
+<%+cbi/valuefooter%>

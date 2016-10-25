@@ -1,0 +1,19 @@
+#!/bin/sh /etc/rc.common
+
+# Copyright (C) 2014 Teltonika
+
+start() {
+	local enabled=`uci -q get operctl.general.enabled`
+	if [ "$enabled" == "1" ]; then
+		local procs=`pgrep -f -o "lua.*operctl"`
+		pgrep "lua.*operctl" > /tmp/test
+# 		logger $procs
+		if [ -z "$procs" ]; then
+			/usr/sbin/operctl start &
+			pgrep -f -o "lua.*operctl" > /var/run/operctl.pid
+		else
+			touch /var/run/operctl
+			logger -t "operctl" "Already running"
+		fi
+	fi
+}

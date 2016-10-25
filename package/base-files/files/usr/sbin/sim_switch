@@ -1,0 +1,726 @@
+#!/usr/bin/env lua
+
+eventlog = require'tlt_eventslog_lua'
+require "teltonika_lua_functions"
+require "lsqlite3"
+require("uci")
+
+local uci = uci.cursor()
+local dmn_name = "sim_switch" --daemon name
+local interval = tonumber(uci:get("sim_switch","sim_switch","interval")) or 20
+local module_vidpid = uci:get("system","module","vid").. ":" ..uci:get("system","module","pid") --Module vid, pid
+
+--PID file variables
+local getPID = "pgrep -o -f 'lua.*".. dmn_name .."'" -- command to get the PID of this script
+local pidPath = "/var/run/" -- prefix for PID filename
+local pidName = dmn_name ..".pid" -- PID filename
+local pidFullPath = pidPath .. pidName -- full path of PID filename
+
+--lock file variables
+local lockDir = "/var/lock" --lock file directory
+local lockFile = dmn_name.. ".lock" --lock file name
+local fullLock = lockDir.. "/" ..lockFile --full lock file path
+
+--Database variables
+local dbPath = "/var/" -- place for running database
+local dbName = "mdcollectd.db" -- database file name
+local tables = {current = "current", days = "days"} --Database tables
+
+--Database variables
+local sms_dbPath = "/var/" -- place for running database
+local sms_dbName = "sms_counter.db" -- database file name
+
+--Sim_switch config variables
+local enabled = uci:get("sim_switch","sim_switch","enabled") or "0"
+local default = uci:get("simcard","simcard","default") --Default SIM card
+local dbg_level = uci:get("sim_switch", "sim_switch", "debug_mode") or 0 --Enable debug mode
+local sim_set = uci:get("sim_switch", "rules", "sim") or ""
+
+local rules = {
+	sim1 = {},
+	sim2 = {}
+	}
+--SIM1 variables
+rules.sim1.switch_signal = uci:get("sim_switch","rules","switchsignal_sim1")
+rules.sim1.switchdata = uci:get("sim_switch","rules","switchdata_sim1")
+rules.sim1.period = uci:get("sim_switch","rules","period_sim1")
+rules.sim1.start_day = tonumber(uci:get("sim_switch", "rules", "start_day_sim1"))
+rules.sim1.start_hour = tonumber(uci:get("sim_switch", "rules", "start_hour_sim1"))
+rules.sim1.start_weekday = tonumber(uci:get("sim_switch", "rules", "start_weekday_sim1"))
+rules.sim1.data_limit = tonumber(uci:get("sim_switch","rules","data_sim1")) or 0
+rules.sim1.min_signal = tonumber(uci:get("sim_switch","rules","signal_sim1"))
+rules.sim1.switchroaming = uci:get("sim_switch","rules","switchroaming_sim1")
+rules.sim1.ondenied = uci:get("sim_switch","rules","ondenied1") or 0
+rules.sim1.switchnonetwork = uci:get("sim_switch","rules","switchnonetwork_sim1")
+rules.sim1.switchfails = uci:get("sim_switch","rules","switchfails_sim1")
+rules.sim1.switchtimeout =  uci:get("sim_switch","rules","switchtimeout_sim1")
+rules.sim1.initial = tonumber(uci:get("sim_switch","rules","initial_sim1")) or 1
+rules.sim1.subsequent = tonumber(uci:get("sim_switch","rules","subsequent_sim1")) or 1
+rules.sim1.switchsms = uci:get("sim_switch","rules","switchsms_sim1")
+rules.sim1.period_sms = uci:get("sim_switch","rules","period_sms_sim1")
+rules.sim1.sms_day = uci:get("sim_switch", "rules", "sms_day_sim1")
+rules.sim1.sms_hour = uci:get("sim_switch", "rules", "sms_hour_sim1")
+rules.sim1.sms_weekday = uci:get("sim_switch", "rules", "sms_weekday_sim1")
+rules.sim1.sms_limit = tonumber(uci:get("sim_switch","rules","sms_sim1")) or 0
+rules.sim1.check_method = uci:get("sim_switch", "rules", "check_method_sim1")
+rules.sim1.icmp_hosts = uci:get("sim_switch", "rules", "icmp_hosts_sim1") or "8.8.8.8"
+rules.sim1.timeout = tonumber(uci:get("sim_switch", "rules", "timeout_sim1"))
+rules.sim1.health_fail_retries = tonumber(uci:get("sim_switch", "rules", "health_fail_retries_sim1"))
+
+--SIM2 variables
+rules.sim2.switch_signal = uci:get("sim_switch","rules","switchsignal_sim2")
+rules.sim2.switchdata = uci:get("sim_switch","rules","switchdata_sim2")
+rules.sim2.period = uci:get("sim_switch","rules","period_sim2")
+rules.sim2.start_day = tonumber(uci:get("sim_switch", "rules", "start_day_sim2"))
+rules.sim2.start_hour = tonumber(uci:get("sim_switch", "rules", "start_hour_sim2"))
+rules.sim2.start_weekday = tonumber(uci:get("sim_switch", "rules", "start_weekday_sim2"))
+rules.sim2.data_limit = tonumber(uci:get("sim_switch","rules","data_sim2")) or 0
+rules.sim2.min_signal = tonumber(uci:get("sim_switch","rules","signal_sim2"))
+rules.sim2.switchroaming = uci:get("sim_switch","rules","switchroaming_sim2")
+rules.sim2.switchnonetwork = uci:get("sim_switch","rules","switchnonetwork_sim2")
+rules.sim2.ondenied = uci:get("sim_switch","rules","ondenied2") or 0
+rules.sim2.switchfails = uci:get("sim_switch","rules","switchfails_sim2")
+rules.sim2.switchtimeout =  uci:get("sim_switch","rules","switchtimeout_sim2")
+rules.sim2.initial = tonumber(uci:get("sim_switch","rules","initial_sim2")) or 1
+rules.sim2.subsequent = tonumber(uci:get("sim_switch","rules","subsequent_sim2")) or 1
+rules.sim2.switchsms = uci:get("sim_switch","rules","switchsms_sim2")
+rules.sim2.period_sms = uci:get("sim_switch","rules","period_sms_sim2")
+rules.sim2.sms_day = uci:get("sim_switch", "rules", "sms_day_sim2")
+rules.sim2.sms_hour = uci:get("sim_switch", "rules", "sms_hour_sim2")
+rules.sim2.sms_weekday = uci:get("sim_switch", "rules", "sms_weekday_sim2")
+rules.sim2.sms_limit = tonumber(uci:get("sim_switch","rules","sms_sim2")) or 0
+rules.sim2.check_method = uci:get("sim_switch", "rules", "check_method_sim2")
+rules.sim2.icmp_hosts = uci:get("sim_switch", "rules", "icmp_hosts_sim2") or "8.8.8.8"
+rules.sim2.timeout = tonumber(uci:get("sim_switch", "rules", "timeout_sim2"))
+rules.sim2.health_fail_retries = tonumber(uci:get("sim_switch", "rules", "health_fail_retries_sim2"))
+
+function debug(level, string, ...)
+	if string then
+		if tonumber(dbg_level) >= level then
+			os.execute(string.format("/usr/bin/logger -t %s \"%s\"", dmn_name, string.format(string, ...)))
+		end
+	end
+end
+
+--Tikrina kuri kortele pasetinta gpio. Grazina 1/0 arba sim1/sim2, priklausomai nuo "form"
+function check_sim(form)
+	local sim = getParam("/sbin/gpio.sh get SIM")
+	if form and form == "word" then
+		if sim == "0" then
+			sim = "sim2"
+		else
+			sim = "sim1"
+		end
+	elseif sim == "-1" then
+		sim = "1"
+	end
+
+	return sim
+end
+
+--Lockinimo funkcija. lock - lock'ina, unlock - unlock'ina.
+function lockUnlock(action)
+	local count = 0
+	--Tikrina ar nera lock failo, jei ne tai lock'inam
+	if action == "lock" then
+		while true do
+			if fileExists(lockDir, lockFile) then
+				count = count + 1
+				if count > 20 then
+					--Triname lock faila
+					debug(1, "Deleting lock " ..fullLock.. " file.")
+					os.remove(fullLock)
+				end
+				debug(1, "Lock file " ..fullLock.. " is presented.")
+				sleep(2)
+			else
+				os.execute("echo \"0\" >" ..fullLock)
+				debug(1, "Sim switch locked at " ..fullLock)
+				return
+			end
+		end
+	elseif action == "unlock" then
+		--Jei tuo metu kai uzlockinta kaskas dare stop arba restart, tada restartuojam programa
+		if fileExists(lockDir, lockFile) then
+			local lockrestart = readFile(fullLock)
+			os.remove(fullLock)
+			if  lockrestart == "1" then
+				debug(1, "Reloading sim_switch")
+				os.execute("/etc/init.d/sim_switch reload")
+				sleep(2)
+			end
+			debug(1, "Sim switch unlocked")
+			return
+		end
+	end
+end
+
+function modem(action)
+	local command = string.format("/etc/init.d/modem %s", action)
+	
+	if action then
+		os.execute(command)
+		return 0
+	end
+	
+	return 1
+end
+
+--Sim korteles switch'inimas.
+--Jei status nenurodyta i kuria kortele perjungti, tada patikrinam kuri kortele aktyvi ir perjungiame i priesinga
+function switch_sim(status, ignore_sleep, ignore_config)
+	local sim
+	local count = 0
+	--Lockinam switchinima, kad programa nebutu sustabdyta darbo ikarsti ir nepaliktu routerio be
+	--modem restart, ifup ppp ar pan.
+	lockUnlock("lock")
+	if not status then sim = check_sim("word") end
+
+	debug(2, "Interface down...")
+	os.execute("/sbin/ifdown ppp")
+
+	debug(2, "Stoping modem...")
+	modem("stop")
+
+	sleep(2)
+	if sim == "sim2" or status == "sim1" then --Perjungiam i sim1
+		getParam("/sbin/gpio.sh set SIM")
+		debug(1, "Switching to sim1")
+	elseif sim == "sim1" or status == "sim2" then --Perjungiam i sim2
+		getParam("/sbin/gpio.sh clear SIM")
+		debug(1, "Switching to sim2")
+	end
+
+	--Irasom i config kuri sim yra aktyvi
+	sim = check_sim()
+	uci:set("sim_switch", "rules", "sim", sim )
+	uci:save("sim_switch")
+	uci:commit("sim_switch")
+
+	if not ignore_config then
+		debug(2, "Seting config...")
+		set_config() --Pasetinam sim configa is simcard i network
+	end
+
+	debug(2, "Starting modem...")
+	modem("start")
+	sleep(1)
+	--Laukiame kol atsiras interface
+	while true do
+		--if (module_vidpid == "12D1:1573" or module_vidpid == "1BC7:1201") and fileExists("/dev", "ttyUSB3") and  fileExists("/dev", "ttyUSB1") then
+		if (module_vidpid == "12D1:1573" or module_vidpid == "1BC7:1201" or module_vidpid == "1BC7:0021") and fileExists("/dev", "modem_cmd") then
+			sleep(2)
+			break
+		end
+		count = count + 1
+		if count >= 30 then
+			sleep(5)
+			break
+		end
+		sleep(2)
+	end
+
+	--Unlockinam switchinima
+	lockUnlock("unlock")
+	restart_services()
+
+	--Laukiame kol prisijungs prie operatoriaus ir susidarys konekcija. Sleepinam tik tada jei intervalas mazesnis uz 10.
+	local method = uci:get("network", "ppp", "method") or ""
+	if method == "pbridge" then
+		wait = (50 - interval) > 0 and (50 - interval) or 0
+	else
+		wait = (35 - interval) > 0 and (35 - interval) or 0
+	end
+	
+	if not ignore_sleep then
+		debug(1, "sim_switch sleep %s", wait)
+		sleep(wait)
+	end
+
+	--Jei bridge, restartuojame LAN, kad galinis irenginys atsinaujintu IP
+	local bridge1 = uci:get("simcard", "sim1", "method") or ""
+	local bridge2 = uci:get("simcard", "sim2", "method") or ""
+	if bridge1 == "bridge" or bridge2 == "bridge" then
+		os.execute("ifdown lan; ifdown lan2; ifup lan; ifup lan2")
+	end
+end
+
+--Restartuojame servisus nurodytus confige 'services' sekcijoje
+function restart_services()
+	debug(2, "Restarting services...")
+	local services = uci:get("sim_switch", "services", "init")
+	for n, service in pairs(services) do
+		debug(1, "Restarting %s service", service)
+		os.execute(string.format("/etc/init.d/%s restart", service))
+		sleep(1)
+	end
+end
+
+--Network config setinimas i priesingo sim
+function set_config()
+	os.execute("/usr/sbin/sim_conf_switch.sh")
+end
+
+function getData(period, current)
+
+	db = initDB(dbPath, dbName)
+	if db == -1 then
+		debug(1, "Database does not exist")
+		return
+	end
+	
+	local seconds
+	local timestamp = os.time()
+	local year, month, weekday, day, hour = tonumber(os.date("%Y", timestamp)), tonumber(os.date("%m", timestamp)), tonumber(os.date("%w", timestamp)), tonumber(os.date("%d", timestamp)), tonumber(os.date("%H", timestamp))
+	local result
+	local table = tables.days
+
+	if period == "month" then
+		if rules[current].start_day > day then
+			month = month - 1
+		end
+		
+		day = rules[current].start_day
+		hour = 0
+	elseif period == "day" then
+		if rules[current].start_hour > hour then
+			day = day - 1
+		end
+		
+		table = tables.current
+		hour = rules[current].start_hour
+	elseif period == "week" then
+		if weekday ~= rules[current].start_weekday then
+			if rules[current].start_weekday > weekday then
+				day = day - (7 - rules[current].start_weekday + weekday)
+			else
+				day = day - (weekday - rules[current].start_weekday)
+			end
+		end
+		hour = 0
+	end
+	
+	local start = tonumber(os.time{year=year, month=month, day=day, hour=hour})
+	local sim = check_sim()
+	local query = string.format("SELECT SUM(rx) as rx, SUM(tx) as tx FROM %s WHERE time>='%d' AND sim=%s", table, start, sim)
+
+	result = selectDB(query, db)
+	closeDB(db)
+	return result
+end
+
+function getSMS(period, current)
+	sms_db = initDB(sms_dbPath, sms_dbName)
+	if sms_db == -1 then
+		return
+	end
+	local seconds
+	local timestamp = os.time()
+	local year, month, weekday, day, hour = os.date("%Y", timestamp), os.date("%m", timestamp), os.date("%w", timestamp), os.date("%d", timestamp), tonumber(os.date("%H", timestamp))
+	local result
+	local table = tables.days
+	local table2 = tables.current
+
+	if period == "month" then
+		day = rules[current].sms_day
+		hour = 0
+		seconds = 2628000
+	elseif period == "day" then
+		hour = rules[current].sms_hour
+		seconds = 86400
+	elseif period == "week" then
+		if weekday ~= rules[current].sms_weekday then
+			if rules[current].sms_weekday > weekday then
+				day = day + rules[current].sms_weekday - weekday
+			else
+				day = day - (weekday - rules[current].sms_weekday)
+			end
+		end
+		hour = 0
+		seconds = 604800
+	end
+	local start = tonumber(os.time{year=year, month=month, day=day, hour=hour})
+	local sim = check_sim()
+	local query = string.format("SELECT SUM(sms) as smsTotal FROM %s WHERE time>='%d' AND time<='%d' AND sim=%s", table, start, start + seconds, sim)
+	result = selectDB(query, sms_db)
+	local query = string.format("SELECT SUM(sms) as smsTotal FROM %s WHERE time>='%d' AND time<='%d' AND sim=%d", table2, start, start + seconds, sim)
+	result2 = selectDB(query, sms_db)
+	closeDB(sms_db)
+	A=tonumber(result[1].smsTotal) or 0
+	B=tonumber(result2[1].smsTotal) or 0
+	result=A+B
+	return result
+end
+
+function start ()
+	if  enabled ~= "1" then
+		--debug(dmn_name .." is disabled")
+		uci:delete("sim_switch", "rules", "sim")
+		uci:commit("sim_switch")
+	else
+		lockUnlock("unlock")
+		if fileExists(pidPath, pidName) then
+			debug(1, "PID file " ..pidFullPath.. " exists")
+			os.exit(0)
+		end
+		sleep(1)
+		local pid = tonumber(getParam(getPID))
+		-- Create a file with PID in it
+		debug(1, "Writing pid: " ..pid.. ", to ".. pidFullPath)
+		os.execute(string.format("echo %d > %s", pid, pidFullPath))
+
+		local timeout = 0
+		local retry = {signal = 1, roaming = 1, connection = 1, noservice = 1 , ondenied = 1}
+		local initial_sub = rules[check_sim("word")].initial
+		local loops = 0
+		local signal
+		local executed = false
+		local current
+		local sim = check_sim()
+
+		while true do
+			current = check_sim("word")
+			if executed then
+				executed = false
+				retry.signal = 0
+				retry.roaming = 0
+				retry.connection = 0
+			end
+
+			-- Switch to other SIM card when signal is too weak
+			if rules[current].switch_signal == "1" and not executed and rules[current].min_signal then
+				signal = tonumber(getParam("/usr/sbin/gsmctl -nq"))
+
+				if signal and signal < rules[current].min_signal then
+					debug(2, "Retry count: " ..retry.signal.. " of 3")
+					if retry.signal >= 3 then --Bandome 2 kartus, tada keiciam sim
+						retry.signal = 0
+						debug(1, "Signal too poor, switching sim card")
+						switch_sim()
+						sim = check_sim()
+						if sim == "1" then
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to weak signal."}
+						else
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to weak signal."}
+						end
+						eventlog:insert(t)
+						executed = true --Nurodome nevygdyti likusiu case
+					else
+						retry.signal = retry.signal + 1
+					end
+				else
+					retry.signal = 0
+				end
+			end
+
+			--Switch to other SIM card when roaming is detected
+			if rules[current].switchroaming == "1" and not executed then
+				local status = string.match(getParam("/usr/sbin/gsmctl -ng") or "", '%(.*%)')
+
+				if status == "(roaming)" then
+					debug(2, "Retry count: %s of 2", retry.roaming)
+					if retry.roaming >= 2 then --Bandome "try" kartu, tada keiciam sim
+						retry.roaming = 0
+						switch_sim()
+						sim = check_sim()
+						if sim == "1" then
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to roaming."}
+						else
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to roaming."}
+						end
+						eventlog:insert(t)
+						executed = true --Nurodome nevygdyti likusiu case
+					else
+						retry.roaming = retry.roaming + 1
+					end
+				else
+					retry.roaming = 0
+				end
+			end
+
+			--Switch to other SIM card when roaming is detected
+			if rules[current].ondenied == "1" and not executed then
+				local status = getParam("/usr/sbin/gsmctl -ng") or ""
+
+				if status == "denied" then
+					debug(2, "Retry count: %s of 2", retry.ondenied)
+					if retry.ondenied >= 2 then --Bandome "try" kartu, tada keiciam sim
+						retry.ondenied = 0
+						switch_sim()
+						sim = check_sim()
+						if sim == "1" then
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due network denied."}
+						else
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due network denied."}
+						end
+						eventlog:insert(t)
+						executed = true --Nurodome nevygdyti likusiu case
+					else
+						retry.ondenied = retry.ondenied + 1
+					end
+				else
+					retry.ondenied = 0
+				end
+			end
+
+			--Switch to other SIM card when connection fails
+			if rules[current].switchfails == "1" and not executed then
+				debug(2, "Connection fail switch is enabled")
+				local has_connection = true
+				local error = false
+				wan_ifname = get_wan_option("type", "mobile", "ifname")
+				wan_enabled = wan_section_enabled("type", "mobile")
+				
+				if (wan_ifname == "3g-ppp" or wan_ifname == "eth2" or wan_ifname == "wwan0") and wan_enabled == "1" then
+ 					if rules[current].check_method == "lcp" then
+						local connection = getParam("/usr/sbin/gsmctl -nj")
+
+						if connection == "disconnected"  then
+							debug(2, "Retry count: " ..retry.connection.. " of 3 ")
+							if retry.connection >= 2 then --Bandome 2 kartus, tada keiciam sim
+								has_connection = false
+								retry.connection = 0
+							else
+								retry.connection = retry.connection + 1
+							end
+						else
+							retry.connection = 0
+						end
+					elseif rules[current].check_method == "icmp" then
+						if rules[current].icmp_hosts then
+							local command = string.format("ping -q -s 0 -W %d -c 3 -I %s %s", rules[current].timeout, wan_ifname, rules[current].icmp_hosts)
+							local pp   = io.popen(command)
+							local line = ""
+							local last_line
+
+							while true do
+								line = pp:read()
+								if (line == nil) then break end
+								last_line = line
+							end
+
+							pp:close()
+							loss = last_line:match("(%d+)%%")
+
+							if loss then
+								if tonumber(loss) == 100 then
+									debug(2, "%d%% packet loss", loss)
+									error = true
+								end
+							else
+								error = true
+							end
+							if error then
+								if retry.connection >= rules[current].health_fail_retries then
+									has_connection = false
+									retry.connection = 0
+								else
+									retry.connection = retry.connection + 1
+								end
+							else
+								retry.connection = 0
+							end
+						end
+					end
+
+					if not has_connection then
+						debug(1, "Network is unreachable, switcing sim card")
+						switch_sim()
+						sim = check_sim()
+						if sim == "1" then
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to data connection fail."}
+						else
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to data connection fail."}
+						end
+						eventlog:insert(t)
+						executed = true --Nurodome nevygdyti likusiu case
+					end
+				end
+			end
+
+			--Switch to backup SIM card when data limit is exceeded
+			if rules[current].switchdata == "1" and not executed then
+				local data
+				data_used = getData(rules[current].period, current)
+
+				if data_used and data_used[1].tx and data_used[1].rx then
+					data = (data_used[1].tx + data_used[1].rx) / (1024 * 1024)
+					data = round(data, 3)
+
+					if data >= rules[current].data_limit then
+						debug(1, "Data limit is exceeded. Switching to other sim")
+						switch_sim()
+						sim = check_sim()
+						if sim == "1" then
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to data limit is exceeded."}
+						else
+							t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to data limit is exceeded."}
+						end
+						eventlog:insert(t)
+						executed = true --Nurodome nevygdyti likusiu case
+					end
+				else
+					debug(1, "Can't get data")
+				end
+			end
+
+			--Switch to other SIM card when network isn't detected
+			if rules[current].switchnonetwork == "1" and not executed then
+				local responce = string.gsub(getParam("/usr/sbin/gsmctl -A \"AT+CREG?\"") or "", "+CREG: ", "")
+
+				if responce then
+					local n ,status = responce:match("(%d+),(%d+)")
+
+					if status and status ~= "1" and status ~= "5" then
+						debug(2, "Retry count: %s of 4", retry.noservice)
+						if retry.noservice >= 4 then --Bandome "try" kartu, tada keiciam sim
+							retry.noservice = 0
+							switch_sim()
+							debug(1, "Switch to other SIM card, network isn't detected")
+							sim = check_sim()
+							if sim == "1" then
+								t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to no service."}
+							else
+								t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to no service."}
+							end
+							eventlog:insert(t)
+							executed = true --Nurodome nevygdyti likusiu case
+						else
+							retry.noservice = retry.noservice + 1
+						end
+					else
+						retry.noservice = 0
+					end
+				end
+			end
+
+			--Switch to backup SIM card when sms limit is exceeded
+			if rules[current].switchsms == "1" and not executed then
+				executed = check_sms()
+			end
+
+			current = check_sim("word")
+
+			if current == default then
+				loops = loops + 1
+			end
+
+			--Switch to default SIM card after timeout
+			if rules[current].switchtimeout == "1" and current ~= default then
+				if loops > 20 then --Jei default sim kuris laikas veike, tai timeout nedidinam
+					initial_sub = rules[current].initial
+				end
+				if executed then
+					timeout = 0
+				else
+					timeout = timeout + interval/60
+				end
+
+				if timeout >= initial_sub then
+					timeout = 0
+					loops = 0
+					if initial_sub < 120 then
+						initial_sub = initial_sub + rules[current].subsequent
+					end
+					switch_sim(default)
+					sim = check_sim()
+					if sim == "1" then
+						t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to timeout."}
+					else
+						t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to timeout."}
+					end
+					eventlog:insert(t)
+				end
+			end
+			sleep(interval)
+		end
+	end
+end
+
+function stop()
+	debug(1, "Stoping " ..dmn_name.. "...")
+	local kill
+	if fileExists(pidPath, pidName) then
+		local pid = readFile(pidFullPath)
+		kill = os.execute(string.format("kill -9 %d", pid))
+		os.remove(pidFullPath)
+	else
+		debug(1, "Pid file does not exist")
+	end
+
+	if kill then
+		local sim = check_sim("word")
+		--Jei isjungiant aktyvi kortele yra secondary, tada switch'inam i default
+		if  enabled ~= "1" then
+			if sim ~= default then
+				switch_sim(default)
+			end
+			uci:delete("sim_switch", "rules", "sim")
+			uci:commit("sim_switch")
+		end
+  		debug(1, dmn_name .." succesfully stopped.")
+	end
+
+end
+
+function sim_stat()
+	print(check_sim("word"))
+end
+
+function check_sms()
+	current = check_sim("word")
+	executed = false
+ 	debug(2, "SMS limit switch is enabled")
+	local sms
+	sms_used = getSMS(rules[current].period_sms, current)
+
+	if sms_used >0 then
+		sms = sms_used
+
+		if sms >= rules[current].sms_limit then
+			switch_sim()
+			sim = check_sim()
+			if sim == "1" then
+				t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 2 to SIM 1 due to sms limit is exceeded."}
+			else
+				t = {requests = "insert", table = "EVENTS", type="SIM switch", text="Switched from SIM 1 to SIM 2 due to sms limit is exceeded."}
+			end
+			eventlog:insert(t)
+			executed = true --Nurodome nevygdyti likusiu case
+		end
+	else
+		debug(2, "Can't get sms")
+	end
+	return executed
+end
+--
+-- Program execution
+--
+if #arg > 0 and #arg <= 4 then
+	if arg[1] == "start" then start()
+	elseif arg[1] == "stop" then stop()
+	elseif arg[1] == "restart" then stop() start()
+	elseif arg[1] == "sim" then sim_stat()
+	elseif arg[1] == "services" then restart_services()
+	elseif arg[1] == "config" then set_config()
+	elseif arg[1] == "change" and arg[2] then switch_sim(arg[2], arg[3], arg[4])
+	elseif arg[1] == "check_sms" then check_sms()
+	else
+		local out =
+[[------------------------------------------------
+---------SIM switch-----------------------------
+------------------------------------------------
+
+	unknown command line argument.
+
+usage:
+  switch start
+  switch stop
+  switch restart
+  switch change [sim1/sim2]
+  switch sim
+  switch services
+]]
+		print(out)
+	end
+end

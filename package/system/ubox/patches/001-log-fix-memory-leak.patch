@@ -1,0 +1,43 @@
+From: Luka Perkov <luka@openwrt.org>
+Date: Tue, 21 Apr 2015 17:04:45 +0000 (+0200)
+Subject: log: make valgrind less complain by freeing allocated memory
+X-Git-Url: http://nbd.name/gitweb.cgi?p=luci2%2Fubox.git;a=commitdiff_plain;h=7ef8dda5115d8a2c1157c0438af710c555f40b32
+
+log: make valgrind less complain by freeing allocated memory
+
+Signed-off-by: Luka Perkov <luka@openwrt.org>
+---
+
+diff --git a/log/logd.c b/log/logd.c
+index 4a7a746..a4335ea 100644
+--- a/log/logd.c
++++ b/log/logd.c
+@@ -70,6 +70,7 @@ read_log(struct ubus_context *ctx, struct ubus_object *obj,
+	struct log_head *l;
+	int count = 0;
+	int fds[2];
++	int ret;
+
+	if (msg) {
+		blobmsg_parse(&read_policy, 1, &tb, blob_data(msg), blob_len(msg));
+@@ -96,7 +97,9 @@ read_log(struct ubus_context *ctx, struct ubus_object *obj,
+		blobmsg_add_u32(&b, "source", l->source);
+		blobmsg_add_u64(&b, "time", l->ts.tv_sec * 1000LL);
+		l = log_list(count, l);
+-		if (ustream_write(&cl->s.stream, (void *) b.head, blob_len(b.head) + sizeof(struct blob_attr), false) <= 0)
++		ret = ustream_write(&cl->s.stream, (void *) b.head, blob_len(b.head) + sizeof(struct blob_attr), false);
++		blob_buf_free(&b);
++		if (ret < 0)
+			break;
+	}
+	return 0;
+diff --git a/log/syslog.c b/log/syslog.c
+index f75fed9..a596b48 100644
+--- a/log/syslog.c
++++ b/log/syslog.c
+@@ -299,4 +299,5 @@ log_shutdown(void)
+	ustream_free(&klog.stream);
+	close(slog.fd.fd);
+	close(klog.fd.fd);
++	free(log);
+ }

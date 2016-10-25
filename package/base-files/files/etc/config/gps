@@ -1,0 +1,23 @@
+config gps 'gps'
+	option enabled '0'
+	option enabled_server '0'
+	option proto 'tcp'
+	option ip '212.47.99.61'
+	option port '17050'
+	option min_period '5'
+	option min_distance '200'
+	option min_angle '30'
+	option min_saved_record '20'
+	option send_period 60
+
+config rule
+	option wan 'mobile'
+	option type 'home'
+	option din2 'low'
+	option min_period '5'
+	option min_distance '200'
+	option min_angle '30'
+	option min_saved_record '20'
+	option send_period 60
+
+config geofencing geofencing

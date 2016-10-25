@@ -1,0 +1,85 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008 Jo-Philipp Wich <xm@leipzig.freifunk.net>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: flashops.htm 7798 2011-10-26 23:43:04Z jow $
+
+-%>
+<%
+local ds = require "luci.dispatcher"
+%>
+<script type="text/JavaScript" src="/luci-static/teltonikaExp/upload-validation.js"></script>
+
+
+<%+header%>
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">//<![CDATA[
+	function change(){
+		if(document.getElementById('from').value=="server"){
+			document.getElementById("archive").style.display = "none";
+			document.getElementById("input_label").style.display = "none";
+			document.getElementById("backup_form").action=document.getElementById("server_form").value;
+			document.getElementById("submit-button-config").value = "Upgrade";
+		}else{
+			document.getElementById("archive").style.display = "";
+			document.getElementById("input_label").style.display = "";
+			document.getElementById("backup_form").action=document.getElementById("file_form").value;
+			document.getElementById("submit-button-config").value = "Upload archive";
+		}
+	}
+//]]></script>
+<h2><a id="content" name="content"><%=translate("Backup")%></a></h2>
+<div class="cbi-map-descr"><%=translate("")%> </div>
+
+<fieldset class="cbi-section">
+
+		<legend><%=translate("Backup Configuration")%></legend>
+		<form method="post" id="backup_form" action="<%=REQUEST_URI%>" enctype="multipart/form-data">
+			<input type="hidden" id="file_form" value="<%=luci.dispatcher.build_url("admin", "system", "admin", "backup")%>" />
+			<input type="hidden" id="server_form" value="<%=luci.dispatcher.build_url("admin", "system", "admin","auto")%>" />
+			<div class="cbi-section-descr"><!--<%:Click "Generate archive" to download a tar archive of the current configuration files. To reset the firmware to its initial state, click "Perform reset" (only possible with squashfs images).%>--></div>
+			<div class="cbi-section-node">
+				<div class="cbi-value<% if not reset_avail then %> cbi-value-last<% end %>">
+					<label class="cbi-value-title" for="image"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Download current router settings file to personal computer')%>')"</span><%=translate("Backup archive")%>:</label>
+					<div class="cbi-value-field">
+						<input class="cbi-button cbi-button-apply1" type="submit" name="backup" value="<%=translate('Download')%>" />
+					</div>
+				</div>
+			</br>
+			</div>
+			<br />
+		<br /> 
+
+		<legend><%=translate("Restore Configuration")%></legend>
+			<br />
+			<div class="cbi-value-title" id="block_keep_o">
+				<label class="cbi-value-title" for="from"></label>
+				<div class="cbi-value-field">
+					<select id="from" onchange="change()">
+						<option value="file">Upgrade from file</option>
+						<option value="server">Upgrade from FOTA</option>
+					</select>
+				</div>
+			</div>
+			<div class="cbi-section-descr"><!--<%=translate("To restore configuration files, you can upload a previously generated backup archive here.")%>--></div>
+			<div class="cbi-section-node">
+				<div class="cbi-value cbi-value-last">
+					<label id="input_label" class="cbi-value-title" for="archive"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('To restore configuration files, you can upload a previously generated backup archive here')%>')"</span><%=translate("Restore from backup")%>:</label>
+					<div class="cbi-value-field">
+						<input type="file" name="archive" id="archive" onchange="CheckFilesize('archive', '2097152', 'Selected file is to large, max 2 MB', 'Selected file is empty');" /><br />
+						<input id="submit-button-config" type="submit" class="cbi-button cbi-input-apply" name="restore" value="<%=translate("Upload archive")%>" />
+					</div>
+				</div>
+			</div>
+		</form>
+
+</fieldset>
+
+<%+footer%>

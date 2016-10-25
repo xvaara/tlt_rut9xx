@@ -1,0 +1,39 @@
+#!/bin/sh /etc/rc.common
+# Workaround for Huawei LTE ARP requests in bridge mode
+
+START=99
+STOP=99
+EBTABLES="/usr/sbin/ebtables"
+CONFIG_GET="uci get"
+
+start() {
+	lan_ifname=$($CONFIG_GET -q "network.lan.ifname")
+	ppp_ifname=$($CONFIG_GET -q "network.ppp.ifname")
+	[ $(echo $lan_ifname | grep -c $ppp_ifname) = 1 ] || return
+	. /lib/teltonika-functions.sh
+	if [ $(get_vidpid_tlt) = $HUAWEI_LTE ]; then
+		interface=eth0
+	elif [ $(get_vidpid_tlt) = $QUECTEL ] || [ $(get_vidpid_tlt) = $TELIT_LTE ]; then
+		interface=wwan0
+	else
+		return
+	fi
+	
+	#Fix ARP issue
+	lan_ip=$($CONFIG_GET -q "network.lan2.ipaddr")
+	# Drop ARP requests looking for dublicated IP
+	$EBTABLES -t nat -A PREROUTING -p arp --arp-ip-src 0.0.0.0 --arp-opcode Request -j DROP
+	# Reply with Huawei MAC to all other requests
+	$EBTABLES -t nat -A PREROUTING -p arp --arp-ip-dst ! ${lan_ip:-"192.168.1.1"} \
+		--arp-opcode Request -j arpreply --arpreply-mac 02:50:f3:00:00:00
+	
+	#Bind to MAC
+	mac=$($CONFIG_GET -q "network.ppp.bind_mac")
+	if [ -n "$mac" ]; then
+		$EBTABLES -t nat -A PREROUTING -i $interface -j dnat --to-destination "$mac"
+	fi
+}
+
+stop() {
+	$EBTABLES -t nat --flush
+}

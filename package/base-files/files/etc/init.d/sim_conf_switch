@@ -1,0 +1,8 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2014 Teltonika
+
+START=43
+
+start() {
+	/usr/sbin/sim_conf_switch.sh default
+}

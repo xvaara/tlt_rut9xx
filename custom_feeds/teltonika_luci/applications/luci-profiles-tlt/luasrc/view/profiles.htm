@@ -1,0 +1,144 @@
+<%
+local uci = require "luci.model.uci".cursor()
+local path = uci:get("profiles", "profiles", "path")
+local ds = require "luci.dispatcher"
+local translate, translatef = luci.i18n.translate, luci.i18n.translatef
+local sys = require "luci.sys"
+local isempty
+local profile_name = uci:get("profiles", "profiles", "profile")
+local profile_date = uci:get("profiles", "profiles", "date")
+	
+function getProfiles()
+	local profiles = {}
+	local list = fileList()
+
+	for name, date in string.gmatch(list, "([%w_]+)_(%d+-%d+-%d+)%.tar%.gz") do
+		profiles[#profiles+1] = { name, date }
+	end
+		if #profiles == 0 then
+			isempty = true
+		end
+	return profiles
+end
+
+function fileList()
+	local cmd = "ls ".. path
+	local h = io.popen(cmd)
+	local t = h:read("*all")
+	h:close()
+	return t
+end
+
+local function getParam(cmd)
+	local h = io.popen(cmd)
+	local t = h:read()
+	h:close()
+	return t
+end
+
+local function configHasChanged(name, date, path)
+	
+	if name and date and path then
+		local md5cur = getParam("md5sum /etc/config/* /etc/shadow | grep -v profiles | md5sum")
+		local md5org = getParam(string.format("cat %s/%s_%s.md5", path, name, date))
+		
+		if md5cur ~= md5org then
+			return true
+		end
+	end
+	
+	return false
+end
+
+local profile_modified = configHasChanged(profile_name, profile_date, path)
+
+%>
+<%+header%>
+
+<script>
+function spin_loader(interval) {
+	document.getElementById("spin-loader").style.display='';
+	setTimeout("window.location.href=window.location.href", interval);
+}
+</script>
+<% if long then %>
+	<div id="err_message" class="alert-message error"><%=translate("Profile name cannot be more than 10 characters.") %></div>
+<% elseif zero then %>
+	<div id="err_message" class="alert-message error"><%=translate("Profile name cannot be empty.") %></div>
+<% elseif alphanum then %>
+	<div id="err_message" class="alert-message error"><%=translate("Profile name should contain only alphanumeric characters.") %></div>
+<% elseif exist then %>
+	<div id="err_message" class="alert-message error"><%=translatef("Profile %s already exists.", profile) %></div>
+<% elseif profnum then %>
+	<div id="err_message" class="alert-message error"><%=translate("Max number of profile was created.") %></div>
+<% elseif error_msg then %>
+	<div id="err_message" class="alert-message error"><%=translate("Error creating profile") %></div>
+<% elseif updated then %>
+	<div id="err_message" class="alert-message success"><%=translatef("Profile %s updated", profile) %></div>
+<% elseif update_err then %>
+	<div id="err_message" class="alert-message error"><%=translate("Error updating profile") %></div>
+<% elseif long == false and zero == false and alphanum == false and exist == false and profnum == false and error_msg == false then %>
+	<div id="err_message" class="alert-message success"><%=translatef("Profile %s created", profile) %></div>
+<% end %>
+<div id="spin-loader" class="applyChanges" style="display: none;">
+	<span><%=translate("Please wait...")%></span>
+	<% if not nano then %>
+		<img src="<%=resource%>/icons/loading.gif" alt="<%:Loading%>" />
+	<% else %>
+		<div class="spin_wrapper">
+			<div id="foo"></div>
+		</div>
+	<% end %>
+</div>
+<div class="cbi-map" id="cbi-monitoring">
+	<h2><a><%=translate("Configuration Profiles")%></a></h2>
+
+	<p><fieldset class="cbi-section">
+
+	<legend><%=translate("Manage Profiles")%></legend>
+	<form method="post" action="<%=REQUEST_URI%>" enctype="multipart/form-data" onsubmit="document.getElementById('spin-loader').style.display='';">
+		<span onmouseout="HideHint(this)" style="margin:10px;" onmouseover="ShowHint(this, '<%=translate('Create a new profile from current configuration')%>')"><%=translate("Profile name ")%></span>
+		<input type="text" name="profile-add-name" style="width: 150px;">
+		<input class="cbi-button" type="submit" value="<%=translate('Add profile')%>" name="profile-add-button">
+		
+	</form>
+	</fieldset></p>
+	<div class="cbi-map-descr">
+
+	<table class="cbi-section-table">
+		<tr>
+			<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Name of the profile. Used for easier profiles management purpose only')%>')"</span><%=translate("Profile name")%></span></th>
+			<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Specifies the date when profile was created')%>')"</span><%=translate("Created")%></span></th>
+			<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Specifies action of profile')%>')"</span><%=translate("Action")%></span></th>
+		</tr>
+		<tr><th colspan="3"></th></tr>
+		<% for _,profile in ipairs(getProfiles()) do %>
+		<tr>
+			<td><%=profile[1]%></td><td><%=profile[2]%></td>
+			<td>
+				<form method="post" action="<%=REQUEST_URI%>" enctype="multipart/form-data" onsubmit="document.getElementById('spin-loader').style.display='';">
+					<% applystring = translate("Your profile will be change.\\nDo you want to continue?")
+					applystring = translate("Your profile will be updated.\\nDo you want to continue?")
+					deletestring = translatef("Are you sure you want to delete %s profile?",profile[1])
+					%>
+					<% --If profile is modifed, show update button
+					if profile[1] == profile_name and profile[2] == profile_date and profile_modified then %>
+					<input class="cbi-button" type="submit" value="<%=translate('Update')%>" name="profile-update-button" onclick="return confirm('<%=applystring%>')">
+					<% end %>
+					<input class="cbi-button" type="submit" value="<%=translate('Apply')%>" name="profile-apply-button" onclick="return confirm('<%=applystring%>')">
+					<input class="cbi-button" type="submit" value="<%=translate('Delete')%>" name="profile-delete-button" onclick="return confirm('<%=deletestring%>')">
+					<input type="hidden" value="<%=profile[1]%>" name="profile-name">
+					<input type="hidden" value="<%=profile[2]%>" name="profile-date">
+				</form>
+			</td>
+		</tr>
+		<% end %>
+		<% if isempty then %>
+			<tr class="cbi-section-table-row">
+				<td style="padding:20px 0 20px 10px;" colspan="3"><em><%=translate("There are no profiles created yet")%></em></td>
+			</tr>
+		<% end %>
+	</table>
+	</div>
+</div>
+<%+footer%>

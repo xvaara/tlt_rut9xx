@@ -1,0 +1,26 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+logger "$BUTTON was $ACTION for $SEEN seconds"
+
+if [ "${ACTION}" = "pressed" ]
+then
+	/etc/init.d/ledsman stop
+	/usr/sbin/led_reset_count.sh &
+	exit
+fi
+
+if [ "$SEEN" -gt 4 ]
+then
+	echo "FACTORY RESET" > /dev/console
+	killall led_reset_count.sh
+	/usr/sbin/ledbar.sh blink red
+	jffs2mark -y && reboot -r &
+else
+	echo "REBOOT" > /dev/console
+	killall led_reset_count.sh
+	/usr/sbin/ledbar.sh blink green
+	sync
+	reboot -b
+fi

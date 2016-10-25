@@ -1,0 +1,40 @@
+--- a/drivers/hwmon/mcp3021.c
++++ b/drivers/hwmon/mcp3021.c
+@@ -26,7 +26,7 @@
+ /* Vdd info */
+ #define MCP3021_VDD_MAX		5500
+ #define MCP3021_VDD_MIN		2700
+-#define MCP3021_VDD_REF		3300
++#define MCP3021_VDD_REF		3260
+ 
+ /* output format */
+ #define MCP3021_SAR_SHIFT	2
+@@ -39,6 +39,8 @@
+ #define MCP3221_SAR_MASK	0xfff
+ #define MCP3221_OUTPUT_RES	12	/* 12-bit resolution */
+ #define MCP3221_OUTPUT_SCALE	1
++#define MCP3221_INPUT_DEVIDENT	131
++#define MCP3221_INPUT_DEVISOR	18
+ 
+ enum chips {
+ 	mcp3021,
+@@ -84,13 +86,17 @@
+ 
+ static inline u16 volts_from_reg(struct mcp3021_data *data, u16 val)
+ {
++	long int divident;
++	long int devisor;
++	
+ 	if (val == 0)
+ 		return 0;
+ 
+ 	val = val * data->output_scale - data->output_scale / 2;
++	divident = val * data->vdd * MCP3221_INPUT_DEVIDENT;
++	devisor = (1 << data->output_res) * data->output_scale * MCP3221_INPUT_DEVISOR;
+ 
+-	return val * DIV_ROUND_CLOSEST(data->vdd,
+-			(1 << data->output_res) * data->output_scale);
++	return DIV_ROUND_CLOSEST(divident, devisor);
+ }
+ 
+ static ssize_t show_in_input(struct device *dev, struct device_attribute *attr,

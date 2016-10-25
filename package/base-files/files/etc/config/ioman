@@ -1,0 +1,4 @@
+config ioman 'ioman'
+	option interval '3'
+	option active_DOUT1_status '1'
+	option active_DOUT2_status '1'

@@ -1,0 +1,24 @@
+--- a/crypto/sha/Makefile
++++ b/crypto/sha/Makefile
+@@ -137,6 +137,9 @@ dclean:
+ clean:
+        rm -f *.s *.o *.obj lib tags core .pure .nfs* *.old *.bak fluff
+
++sha256-mips.o: sha256-mips.S
++	$(CC) -fPIC -c -o sha256-mips.o sha256-mips.S
++
+ # DO NOT DELETE THIS LINE -- make depend depends on it.
+
+ sha1_one.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
+--- a/crypto/aes/Makefile
++++ b/crypto/aes/Makefile
+@@ -135,6 +135,9 @@ dclean:
+ clean:
+        rm -f *.s *.o *.obj lib tags core .pure .nfs* *.old *.bak fluff
+
++aes-mips.o: aes-mips.S
++	$(CC) -fPIC -c -o aes-mips.o aes-mips.S
++
+ # DO NOT DELETE THIS LINE -- make depend depends on it.
+
+ aes_cbc.o: ../../include/openssl/aes.h ../../include/openssl/modes.h

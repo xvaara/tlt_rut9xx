@@ -1,0 +1,339 @@
+#!/usr/bin/env lua
+
+require "teltonika_lua_functions"
+require("uci")
+
+local uci = uci.cursor()
+local dbg_level = 1
+
+local name = "operctl"
+local config = name
+local pidPath = "/var/run/" -- prefix for PID filename
+local pidName = name ..".pid" -- PID filename
+local pidFullPath = pidPath .. pidName -- full path of PID filename
+
+local ppp = true
+local registered = true
+
+function debug(level, string, ...)
+	if string then
+		if dbg_level >= level then
+			os.execute(string.format("/usr/bin/logger -t %s \"%s\"", name, string.format(string, ...)))
+		end
+	end
+end
+
+function print_table( t )
+    local print_r_cache={}
+    local function sub_print_r(t,indent)
+        if (print_r_cache[tostring(t)]) then
+            print(indent.."*"..tostring(t))
+        else
+            print_r_cache[tostring(t)]=true
+            if (type(t)=="table") then
+                for pos,val in pairs(t) do
+                    if (type(val)=="table") then
+                        print(indent.."["..pos.."] => "..tostring(t).." {")
+                        sub_print_r(val,indent..string.rep(" ",string.len(pos)+8))
+                        print(indent..string.rep(" ",string.len(pos)+6).."}")
+                    elseif (type(val)=="string") then
+                        print(indent.."["..pos..'] => "'..val..'"')
+                    else
+                        print(indent.."["..pos.."] => "..tostring(val))
+                    end
+                end
+            else
+                print(indent..tostring(t))
+            end
+        end
+    end
+    if (type(t)=="table") then
+        print(tostring(t).." {")
+        sub_print_r(t,"  ")
+        print("}")
+    else
+        sub_print_r(t,"  ")
+    end
+    print()
+end
+
+function load_config()
+	uci = uci.cursor()
+	debug(4, "Loading config")
+	local list = {}
+	uci:foreach(config, "list", function(s)
+		if s.code then
+			table.insert(list, s.code)
+		end
+	end)
+
+	return list
+end
+
+function scan_operators()
+-- 	Nutraukiame duomenu konekcija ir issiregistruojame
+	if ppp then
+		getParam("/sbin/ifdown ppp")
+		ppp = false
+	end
+	if registered then
+-- 		Kartais is pirmo karto nepavyksta isiregistruoti, todel esant reikalui kartojame komanda.
+		if send_at("AT+COPS=2") < 1 then
+			send_at("AT+COPS=2")
+		end
+		registered = false
+	end
+
+	local operators = {}
+	local list = assert(io.popen('/usr/sbin/gsmctl -A AT+COPS=?', 'r'))
+	local l = list:read("*a")
+-- 	local l = [[+COPS: (1,"LT BITE GSM","BITE","24602",7),(1,"LT BITE GSM","BITE","24602",2),(1,"LT BITE GSM","BITE","24602",0),(3,"Tele2 LT","Tele2 LT","24603",2),(3,"Tele2 LT","Tele2 LT","24603",0),(3,"Tele2 LT","Tele2 LT","24603",7),(3,"OMNITEL LT","OMT","24601",0),(3,"OMNITEL LT","OMT","24601",7),(3,"OMNITEL LT","OMT","24601",2),,(0,1,2,3,4),(0,1,2) (339)]]
+
+	if l then
+		if l:match("OK") == "OK" then
+			debug(4, "OK")
+		elseif l:match("Timeout") == "Timeout" then
+			debug(4, "Timeout")
+		elseif l:match("error") == "error" then
+			debug(4, "Error")
+		elseif l:match("+COPS:") then
+			debug(4, "Operators successfully scaned. Parsing.")
+			l = string.gsub(l, "+COPS:", "")
+			local i = 1
+			local n
+			for word in string.gmatch(l, '%b()') do
+					n = 1
+					operators[i] = {}
+					for val in string.gmatch(word, '([^(),]+)') do
+						val = string.gsub(val, '"', "")
+						if val == "" then
+							val = "-"
+						end
+						operators[i][n] = tostring(val)
+						n = n + 1
+					end
+					i = i + 1
+			end
+		else
+			debug(1, "Empty responce")
+		end
+
+	end
+
+	list:close()
+
+-- 	Pasalinam 3 paskutinius irasus, nes jie nereikalingi
+	if #operators > 3 then
+		for i=1, 3 do
+			table.remove(operators, #operators)
+		end
+	end
+
+	return operators
+end
+
+function check_registration()
+	local responce = assert(io.popen("/usr/sbin/gsmctl -A AT+COPS?", 'r'))
+	if responce then
+		local l = responce:read("*a")
+		if l  then
+			if l:match("Timeout") == "Timeout" then
+				debug(4, "Timeout")
+				return 0
+			elseif l:match("error") == "error" then
+				debug(4, "Error")
+				return 0
+			elseif l:match("+COPS:") then
+				return l:match("%d%d%d%d%d") or 0
+			end
+		end
+		responce:close()
+	end
+
+	return 0
+end
+
+function check_operators(config_list, scaned_list, tmp_blacklist, mode)
+	debug(1, "Checking operators: [%s]", mode)
+	if mode then
+		if mode == "whitelist" then
+			for nc, ic in ipairs(config_list)  do
+				for ns, is in ipairs(scaned_list) do
+					if ic and is then
+						if ic == is[4] then
+							--Tikriname ar operatorius nebuvo itrauktas i tmp black list del nesekmingo prisijungimo
+							if #tmp_blacklist > 0 then
+								local alive = true
+								for nt, it in ipairs(tmp_blacklist) do
+									if ic == it then
+										alive = false
+									end
+								end
+
+								if alive then
+									return ic
+								end
+							else
+								return ic
+							end
+						end
+					end
+				end
+			end
+		elseif mode == "blacklist" then
+			local blocked
+			for ns, is in ipairs(scaned_list)  do
+				--debug(4, "Scaned code[%s]: %s", ns ,is[4])
+				for nc, ic in ipairs(config_list) do
+					--debug(4, "Config code[%s][%s]: %s", ns, nc, ic)
+					blocked = false
+					if ic and is then
+						if ic == is[4] then
+							blocked = true
+							break
+						end
+					end
+
+
+				end
+
+				if not blocked then
+					if #tmp_blacklist > 0 then
+						local alive = true
+						for nt, it in ipairs(tmp_blacklist) do
+							if is[4] == it then
+								debug(4, "Sorry but operator added to black list.")
+								alive = false
+							end
+						end
+						if alive then
+							return is[4]
+						end
+					else
+						return is[4]
+					end
+				end
+			end
+		end
+	end
+end
+
+function send_at(command)
+	local responce = assert(io.popen(string.format(string.format("/usr/sbin/gsmctl -A %s", command), 'r')))
+	if responce then
+		local l = responce:read("*a")
+		if l  then
+			if l:match("OK") then
+				return 1
+			elseif l:match("ERROR") then
+				return 0
+			elseif l:match("Timeout") then
+				return 0
+			else
+				return 1
+			end
+		end
+		responce:close()
+	end
+
+	return 0
+end
+
+function check_md5sum(md5sum)
+	local tmp_md5 = getParam(string.format("md5sum /etc/config/%s", config))
+
+	if md5sum ~= tmp_md5 then
+		return tmp_md5
+	end
+end
+
+function main(reason)
+	debug(1, "Starting operators control. Reason [%s]", reason or "unknown")
+	local config_list = load_config()
+	local md5sum_config = getParam(string.format("md5sum /etc/config/%s", config))
+	local scaned_list = scan_operators()
+	local mode = uci:get(config, "general", "mode")
+	local ppp_enabled = uci:get("network", "ppp", "enabled") or 0
+	local operator_number
+	local current_operator
+	local tmp_blacklist = {}
+
+	while true do
+		local tmp_md5 = check_md5sum(md5sum_config)
+		if tmp_md5 then
+			mode = getParam("uci -q get operctl.general.mode") or "whitelist"
+			config_list = load_config()
+			md5sum_config = tmp_md5
+		end
+		operator_number = check_operators(config_list, scaned_list, tmp_blacklist, mode)
+
+		if operator_number then
+			debug(1, "Trying operator: %s", operator_number)
+			if send_at(string.format("AT+COPS=1,2,\"%s\"", operator_number)) > 0 then
+				send_at("AT+COPS=2") -- Atjungiame ir registruojame is naujo, nes po daug uzklausu pirma registracija buna neteisinga
+				sleep(2)
+				send_at(string.format("AT+COPS=1,2,\"%s\"", operator_number))
+				sleep(4)
+				current_operator = check_registration()
+				if current_operator and current_operator == operator_number then
+					if ppp_enabled == "1" then
+						getParam("/sbin/ifup ppp")
+					end
+					break
+				else -- Pasitaiko kad nespeja prisijungti todel esant reikalui patikriname dar karta.
+					sleep(4)
+					current_operator = check_registration()
+					if current_operator and current_operator == operator_number then
+						if ppp_enabled == "1" then
+							getParam("/sbin/ifup ppp")
+						end
+						break
+					else
+						table.insert(tmp_blacklist, operator_number)
+					end
+				end
+			else
+				table.insert(tmp_blacklist, operator_number)
+				debug(1, "Operator %s added to black list.", operator_number)
+			end
+		else
+			sleep(5)
+			debug(3, "Scaning operators again. Cleaning temporary black list.")
+			scaned_list = scan_operators()
+			tmp_blacklist = {}
+		end
+	end
+
+	local enabled = getParam("uci -q get operctl.general.enabled") or "0"
+	if enabled == "0" then
+		debug(1, "Restarting gsmd.")
+		os.execute("/etc/init.d/gsmd reload")
+	end
+
+	if fileExists(pidPath, pidName) then
+		os.remove(pidFullPath)
+	end
+
+	debug(3, "End.")
+end
+
+function help()
+	local out =
+[[------------------------------------------------
+---------Operators control-----------------------------
+------------------------------------------------
+
+	unknown command line argument.
+
+usage:
+	operctl start
+]]
+	print(out)
+end
+
+if #arg > 0 and #arg <= 2  then
+	if arg[1] == "start" then main(arg[2]) end
+else
+	help()
+end
+

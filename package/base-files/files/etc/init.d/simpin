@@ -1,0 +1,10 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+reload()
+{
+	#Invoked from WebUI so PIN is saved here
+	current=`uci -q get simcard.sim1.pincode`
+	/sbin/mnf_info simpin set "$current"
+}

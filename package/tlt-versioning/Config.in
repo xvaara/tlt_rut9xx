@@ -1,0 +1,35 @@
+config TLT_VERSIONING_RELEASE
+	depends on PACKAGE_tlt-versioning
+	string "Test/Release"
+	help 
+		"R" for release, "T" for test version
+	default T
+
+config TLT_VERSIONING_CLIENT
+	depends on PACKAGE_tlt-versioning
+	string "Client"
+	help 
+		Client code, two decimals
+	default 00
+
+config TLT_VERSIONING_MAJOR
+	depends on PACKAGE_tlt-versioning
+	string "Major"
+	help 
+		Major version number, two decimals
+	default 00
+
+config TLT_VERSIONING_MINOR_ENABLE
+	depends on PACKAGE_tlt-versioning
+	bool "Minor manual"
+	help 
+		Override git commit number and enter Minor version number manually
+	default n
+
+config TLT_VERSIONING_MINOR
+	depends on TLT_VERSIONING_MINOR_ENABLE
+	string "Minor"
+	help 
+		Minor version number, two decimals
+	default 01
+

@@ -1,0 +1,36 @@
+<%+cbi/valueheader%>
+	<% if self:cfgvalue(section) ~= false then %>
+		<input class="cbi-button cbi-input-<%=self.inputstyle or "button" %>" <% if self.onclick then %> <% if self.timeload then %> onclick="output()" <% else %> onclick="<%=self.onclick%>" <% end %> <% end %>  type="submit"<%= attr("name", cbid) .. attr("id", cbid) .. attr("value", self.inputtitle or self.title)%> />
+	<% else %>
+		-
+	<% end %>
+
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">//<![CDATA[
+function output(){
+	var check_load = document.getElementById("Loading");
+	if (check_load == null || check_load == undefined){
+		var para = document.createElement("div");
+		para.id = "Loading"
+		var element = document.getElementById("cbi-system");
+		var child = document.getElementById("cbi-system-system");
+		element.insertBefore(para,child);
+		var text = '<%=translate("Preparing to download... Please wait.")%>';
+		spiner = '<div style="position:relative;text-align:right">' + text + '<img src="/luci-static/resources/icons/loading.gif" style="width: 20px; height: 20px" alt="Loading">'
+		document.getElementById("Loading").innerHTML = spiner;
+	}else{
+		document.getElementById("Loading").style.display='block';
+	}
+	var checkbox = document.getElementById('cbid.system.system.enable_topology');
+	if (checkbox !== null || checkbox !== undefined ){
+		checkbox = checkbox.checked;
+		var start_timer = 6000;
+		if (checkbox == true){
+			start_timer = 18000;
+		}
+		setTimeout(function(){ document.getElementById("Loading").style.display='none'; }, start_timer)
+	}
+}
+
+//]]></script>
+<%+cbi/valuefooter%>

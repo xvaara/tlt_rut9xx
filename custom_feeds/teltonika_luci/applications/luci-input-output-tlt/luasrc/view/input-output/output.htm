@@ -1,0 +1,72 @@
+<%
+	local util= require "luci.util"
+	local sys = require "luci.sys"
+	local translate, translatef = luci.i18n.translate, luci.i18n.translatef
+-%>
+<%+header%>
+<%
+	if luci.http.formvalue("turn_off_out1") then
+		sys.call("gpio.sh clear DOUT1")
+	elseif luci.http.formvalue("turn_on_out1") then
+		sys.call("gpio.sh set DOUT1")
+	elseif luci.http.formvalue("turn_off_out2") then
+		sys.call("gpio.sh clear DOUT2")
+	elseif luci.http.formvalue("turn_on_out2") then
+		sys.call("gpio.sh set DOUT2")
+	end
+
+	local gdout1 = luci.util.trim(sys.exec("gpio.sh get DOUT1"))
+	local gdout2 = luci.util.trim(sys.exec("gpio.sh get DOUT2"))
+	function get_config(out)
+		return luci.sys.exec("uci get ioman.@ioman[0].active_"..out.."_status")
+	end
+	local open_collector_output_cfg = get_config("DOUT1")
+	local relay_output_cfg = get_config("DOUT2")
+-%>
+<form method="post" name="profile-add-form" style="padding-top: 9px;" >
+	<div id="cbi-ntpclient" class="cbi-map">
+		<h2><a id="content" name="content"><%=translate("Output")%></a></h2>
+		<fieldset class="cbi-section">
+			<legend><%=translate("Output")%></legend>
+			<fieldset id="cbi-section-output" class="cbi-section-node">
+				<div id="cbi-output1" class="cbi-value">
+					<label><span onmouseout="HideHint(this)" style="margin:10px;" onmouseover="ShowHint(this, '<%=translate('Turn on/off digital OC output')%>')"><%=translate("Digital OC output")%> </span></label>
+					<div class="cbi-value-field">
+					<% if tonumber(open_collector_output_cfg) == 1 then %>
+						<% if tonumber(gdout1) == 1 then %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn off')%>" name="turn_off_out1">
+						<% else %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn on')%>" name="turn_on_out1">
+						<% end %>
+					<% else %>
+						<% if tonumber(gdout1) == 1 then %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn on')%>" name="turn_on_out1">
+						<% else %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn off')%>" name="turn_o_out1">
+						<% end %>
+					<% end %>
+					</div>
+				</div>
+				<div id="cbi-output2" class="cbi-value">
+					<label><span onmouseout="HideHint(this)" style="margin:10px;" onmouseover="ShowHint(this, '<%=translate('Turn on/off digital relay output')%>')"><%=translate("Digital relay output")%> </span></label>
+					<div class="cbi-value-field">
+					<% if tonumber(relay_output_cfg) == 1 then %>
+						<% if tonumber(gdout2) == 1 then %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn off')%>" name="turn_off_out2">
+						<% else %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn on')%>" name="turn_on_out2">
+						<% end %>
+					<% else %>
+						<% if tonumber(gdout2) == 1 then %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn on')%>" name="turn_on_out2">
+						<% else %>
+							<input class="cbi-button" type="submit" value="<%=translate('Turn off')%>" name="turn_off_out2">
+						<% end %>
+					<% end %>
+					</div>
+				</div>
+			</fieldset>
+		</fieldset>
+	</div>
+</form>
+<%+footer%>

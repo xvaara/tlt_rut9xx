@@ -1,0 +1,37 @@
+--- a/arch/mips/ath79/Kconfig
++++ a/arch/mips/ath79/Kconfig
+@@ -920,6 +920,17 @@ config ATH79_MACH_BHU_BXU2000N2_A
+ 	select ATH79_DEV_USB
+ 	select ATH79_DEV_WMAC
+ 
++config ATH79_MACH_TLT_RUT900
++	bool "Teltonika RUT900 board support"
++	select SOC_AR934X
++	select ATH79_DEV_AP9X_PCI if PCI
++	select ATH79_DEV_ETH
++	select ATH79_DEV_GPIO_BUTTONS
++	select ATH79_DEV_LEDS_GPIO
++	select ATH79_DEV_M25P80
++	select ATH79_DEV_USB
++	select ATH79_DEV_WMAC
++
+ endmenu
+ 
+ config SOC_AR71XX
+--- a/arch/mips/ath79/machtypes.h
++++ a/arch/mips/ath79/machtypes.h
+@@ -161,6 +161,7 @@ enum ath79_mach_type {
+ 	ATH79_MACH_WZR_HP_G450H,	/* Buffalo WZR-HP-G450H */
+ 	ATH79_MACH_ZCN_1523H_2,		/* Zcomax ZCN-1523H-2-xx */
+ 	ATH79_MACH_ZCN_1523H_5,		/* Zcomax ZCN-1523H-5-xx */
++	ATH79_MACH_TLT_RUT900,		/* Teltonika RUT900 */
+ };
+ 
+ #endif /* _ATH79_MACHTYPE_H */
+--- a/arch/mips/ath79/Makefile
++++ a/arch/mips/ath79/Makefile
+@@ -130,3 +130,4 @@ obj-$(CONFIG_ATH79_MACH_WZR_HP_G450H)	+=
+ obj-$(CONFIG_ATH79_MACH_ZCN_1523H)	+= mach-zcn-1523h.o
+ obj-$(CONFIG_ATH79_MACH_CARAMBOLA2)	+= mach-carambola2.o
+ obj-$(CONFIG_ATH79_MACH_NBG6716)	+= mach-nbg6716.o
++obj-$(CONFIG_ATH79_MACH_TLT_RUT900)	+= mach-tlt-rut900.o

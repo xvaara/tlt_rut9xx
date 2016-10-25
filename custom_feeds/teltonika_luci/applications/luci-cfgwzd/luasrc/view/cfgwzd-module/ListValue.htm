@@ -1,0 +1,75 @@
+<%+cbi/valueheader%>
+<%
+local sqlite = require "lsqlite3"
+local dbPath = "/usr/lib/operators/"
+local dbName = "operators.db"
+local dbFullPath = dbPath .. "" ..dbName
+local sys = require "luci.sys"
+list = {}
+
+if fileExists(dbPath, dbName) then
+	local command = io.popen("/usr/sbin/gsmctl -f")
+	local code = command:read("*l")
+	local countryCode = string.match(code, "%d+")
+	if countryCode then
+		countryCode = string.sub(countryCode, 1, 3)
+		local db = sqlite.open(dbFullPath)
+		local query = string.format("SELECT rowid,* FROM operators WHERE code='%s'", countryCode)
+		local stmt = db:prepare(query)
+		if stmt then
+			for row in db:nrows(query) do
+				list[#list+1] = row
+			end
+		end
+		db:close()
+	end
+end
+
+%>
+<script type="text/javascript">
+	var array = <%=luci.http.write_json(list)%>;
+	function fill_fields(rowid){
+		if (rowid != "none"){
+			for (i = 0; i < array.length; i++) {
+				if(array[i].rowid == rowid){
+					set_value("apn", array[i].APN);
+					set_value("dialnumber", array[i].dialNumber);
+					set_value("password", array[i].password);
+					set_value("username", array[i].userName);
+					break;
+				}
+			}
+		}else{
+			set_value("apn", "");
+			set_value("dialnumber", "");
+			set_value("password", "");
+			set_value("username", "");
+		}
+	}
+	function set_value(name, value){
+		var full_name = form_name(name)
+		e = document.getElementById(full_name);
+		if (e) e.value = value;
+		else {
+			for (var i = 0; i < cbi_d.length; i++) {
+				var input = cbi_d[i].node.getElementsByTagName("input");
+				for (var n = 0; n < input.length; n++) {
+					if (input[n].id == full_name){
+						input[n].value = value;
+					}
+				}
+			}
+		}
+	}
+	function form_name(name){
+		var full_name = "cbid.<%=self.config%>.<%=section%>." + name;
+		return full_name
+	}
+</script>
+<select class="cbi-input-select" onchange="cbi_d_update(this.id);fill_fields(this.value);" id="cbid.simcard.sim1.profile" name="cbid.simcard.sim1.profile" size="1">
+	<option id="cbi-simcard-sim1-profile-none" value="none">None</option>
+	<% for i=1,#list do %>
+		<option id="cbi-simcard-sim1-profile-<%=list[i].rowid%>" value="<%=list[i].rowid%>"><%=list[i].country%> (<%=list[i].network%>)</option>
+	<% end %>
+</select>
+<%+cbi/valuefooter%>

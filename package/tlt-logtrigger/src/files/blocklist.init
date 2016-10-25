@@ -1,0 +1,13 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2015 Teltonika
+
+START=11
+STOP=98
+
+start() {
+	logtrigger &
+}
+
+stop() {
+	killall logtrigger
+}

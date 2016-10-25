@@ -1,0 +1,12 @@
+<%+cbi/valueheader%>
+	<div class="cbi-value cbi-value-last" id="cbi-sms_utils-1-message">
+		<label class="cbi-value-title" for="cbid.sms_utils.1.message">
+			<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Message to be sent. Allowable characters: (a-zA-Z0-9!@#$%&*+-/=?^_`{|}~.)')%>')"</span><%=translate("Message")%>
+		</label>
+		<div class="cbi-value-field">
+			<textarea class="cbi-input-textarea" style="width: 385px; height: 90px;" onchange="cbi_d_update(this.id)" name="cbid.sms_utils.auto_reply.msg" id="cbid.sms_utils.auto_reply.msg" rows="4" maxlength="480" ><%=luci.sys.exec("uci get -q sms_utils.auto_reply.msg")%></textarea>
+		</div>
+		<div id="counter" style="margin-left: 315px;" class="cbi-input-textarea-count" >
+		</div>
+	</div>
+<%+cbi/valuefooter%>

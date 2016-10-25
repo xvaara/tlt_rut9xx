@@ -1,0 +1,24 @@
+--- a/arch/mips/ath79/setup.c
++++ a/arch/mips/ath79/setup.c
+@@ -29,6 +29,8 @@
+ #include "common.h"
+ #include "dev-common.h"
+ #include "machtypes.h"
++#include <linux/gpio.h>
++#include <linux/delay.h>
+ 
+ #define ATH79_SYS_TYPE_LEN	64
+ 
+@@ -40,6 +42,12 @@
+ 
+ static void ath79_restart(char *command)
+ {
++	//Set GPIO pin 12 high to disable DC/DC (pin must bu output)
++	printk(KERN_EMERG "Restart: setting reset pin\n");
++	gpio_set_value(12, 1);
++	//Wait for voltage to drop
++	udelay(10000);
++	
+ 	ath79_device_reset_set(AR71XX_RESET_FULL_CHIP);
+ 	for (;;)
+ 		if (cpu_wait)

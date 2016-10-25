@@ -1,0 +1,18 @@
+Index: linux-3.10.36/drivers/net/usb/cdc_ncm.c
+===================================================================
+--- linux-3.10.36.orig/drivers/net/usb/cdc_ncm.c
++++ linux-3.10.36/drivers/net/usb/cdc_ncm.c
+@@ -1245,6 +1245,13 @@ static const struct usb_device_id cdc_de
+ 	  .driver_info = (unsigned long)&wwan_info,
+ 	},
+ 
++	/* Telit LE910 V2 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x1bc7, 0x0036,
++		USB_CLASS_COMM,
++		USB_CDC_SUBCLASS_NCM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&wwan_noarp_info,
++	},
++
+ 	/* Infineon(now Intel) HSPA Modem platform */
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x1519, 0x0443,
+ 		USB_CLASS_COMM,

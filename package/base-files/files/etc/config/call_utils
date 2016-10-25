@@ -1,0 +1,9 @@
+config call 'call'
+	option ringing '0'
+	option reject_incoming_calls '1'
+
+config rule
+	option action 'reboot'
+	option enabled '0'
+	option allowed_phone 'all'
+	option status_sms '0'

@@ -1,0 +1,67 @@
+--- a/defaults.c
++++ b/defaults.c
+@@ -32,10 +32,10 @@ static const struct fw3_chain_spec defau
+ 	C(ANY, FILTER, CUSTOM_CHAINS, "forwarding_rule"),
+ 	C(ANY, FILTER, SYN_FLOOD,     "syn_flood"),
+ 
+-	C(V4,  NAT,    UNSPEC,        "delegate_prerouting"),
+-	C(V4,  NAT,    UNSPEC,        "delegate_postrouting"),
+-	C(V4,  NAT,    CUSTOM_CHAINS, "prerouting_rule"),
+-	C(V4,  NAT,    CUSTOM_CHAINS, "postrouting_rule"),
++	C(ANY,  NAT,    UNSPEC,        "delegate_prerouting"),
++	C(ANY,  NAT,    UNSPEC,        "delegate_postrouting"),
++	C(ANY,  NAT,    CUSTOM_CHAINS, "prerouting_rule"),
++	C(ANY,  NAT,    CUSTOM_CHAINS, "postrouting_rule"),
+ 
+ 	C(ANY, MANGLE, UNSPEC,        "mssfix"),
+ 	C(ANY, MANGLE, UNSPEC,        "fwmark"),
+--- a/zones.c
++++ b/zones.c
+@@ -38,6 +38,8 @@ static const struct fw3_chain_spec zone_
+ 
+ 	C(V4,  NAT,    SNAT,          "zone_%s_postrouting"),
+ 	C(V4,  NAT,    DNAT,          "zone_%s_prerouting"),
++	C(V6,  NAT,    UNSPEC,        "zone_%s_postrouting"),
++	C(V6,  NAT,    UNSPEC,        "zone_%s_prerouting"),
+ 
+ 	C(ANY, RAW,    NOTRACK,       "zone_%s_notrack"),
+ 
+@@ -45,8 +47,8 @@ static const struct fw3_chain_spec zone_
+ 	C(ANY, FILTER, CUSTOM_CHAINS, "output_%s_rule"),
+ 	C(ANY, FILTER, CUSTOM_CHAINS, "forwarding_%s_rule"),
+ 
+-	C(V4,  NAT,    CUSTOM_CHAINS, "prerouting_%s_rule"),
+-	C(V4,  NAT,    CUSTOM_CHAINS, "postrouting_%s_rule"),
++	C(ANY,  NAT,    CUSTOM_CHAINS, "prerouting_%s_rule"),
++	C(ANY,  NAT,    CUSTOM_CHAINS, "postrouting_%s_rule"),
+ 
+ 	{ }
+ };
+@@ -395,6 +397,18 @@ print_interface_rule(struct fw3_ipt_hand
+ 			fw3_ipt_rule_extra(r, zone->extra_dest);
+ 			fw3_ipt_rule_replace(r, "delegate_postrouting");
+ 		}
++
++		if (handle->family == FW3_FAMILY_V6) {
++			r = fw3_ipt_rule_create(handle, NULL, dev, NULL, sub, NULL);
++                        fw3_ipt_rule_target(r, "zone_%s_prerouting", zone->name);
++                        fw3_ipt_rule_extra(r, zone->extra_src);
++                        fw3_ipt_rule_replace(r, "delegate_prerouting");
++
++			r = fw3_ipt_rule_create(handle, NULL, NULL, dev, NULL, sub);
++                        fw3_ipt_rule_target(r, "zone_%s_postrouting", zone->name);
++                        fw3_ipt_rule_extra(r, zone->extra_dest);
++                        fw3_ipt_rule_replace(r, "delegate_postrouting");
++		}
+ 	}
+ 	else if (handle->table == FW3_TABLE_MANGLE)
+ 	{
+@@ -539,7 +553,7 @@ print_zone_rule(struct fw3_ipt_handle *h
+ 		break;
+ 
+ 	case FW3_TABLE_NAT:
+-		if (zone->masq && handle->family == FW3_FAMILY_V4)
++		if (zone->masq && (handle->family == FW3_FAMILY_V4 || handle->family == FW3_FAMILY_V6) )
+ 		{
+ 			fw3_foreach(msrc, &zone->masq_src)
+ 			fw3_foreach(mdest, &zone->masq_dest)

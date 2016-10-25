@@ -1,0 +1,10 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=11
+start() {
+	[ -f /etc/sysctl.conf ] && sysctl -p -e >&-
+	#socket size
+    sysctl -w net.core.rmem_default=450000
+    sysctl -w net.core.wmem_default=450000
+}

@@ -1,0 +1,33 @@
+#!/etc/rc.common
+
+. /lib/functions.sh
+ARP_FILE="/tmp/.static_arp"
+ARP_BIN=/sbin/arp
+
+add_entry() {
+	local ip
+	local mac
+	config_get mac $1 "mac"
+	config_get ip $1 "ip"
+	if [ -n "$ip" ] && [ -n "$mac" ]; then
+		$ARP_BIN -s "$ip" "$mac"
+		[ "$?" -ne "0" ] && logger -t "Static ARP" "Failed to add entry '$ip $mac'"
+		echo "$ip" >> $ARP_FILE
+	fi
+}
+
+start() {
+	rm -f $ARP_FILE
+	config_load "static_arp"
+	config_foreach add_entry "rule"
+}
+
+stop() {
+	if [ -f "$ARP_FILE" ]; then
+		for ip in $(cat $ARP_FILE); do
+			logger "DELETING $ip"
+			$ARP_BIN -d $ip 2>/dev/null
+		done
+		rm -f $ARP_FILE
+	fi
+}

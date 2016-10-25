@@ -1,0 +1,34 @@
+<script type="text/javascript">
+	function get_cord()
+	{
+		XHR.get('<%=luci.dispatcher.build_url("admin", "services", "gps", "getcord")%>', { status: 1 },
+			function(x, info){
+				if (info){
+					document.getElementById("cbid.gps.geofencing.longitude").value = info.long;
+					document.getElementById("cbid.gps.geofencing.latitude").value = info.lat;
+				}else{
+					document.getElementById("cbid.gps.geofencing.longitude").value = "0.000000";
+					document.getElementById("cbid.gps.geofencing.latitude").value = "0.000000";
+				}
+			}
+		);
+	}
+</script>
+
+
+<fieldset class="cbi-section" id="cbi-<%=self.config%>-<%=self.sectiontype%>">
+	<div class="cbi-value cbi-value-last">
+		<label class="cbi-value-title" for="image"><span style="color: rgb(64, 64, 64);" onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Get current router coordinates')" <="" span="">Get current coordinates</span></label>
+		<div class="cbi-value-field">
+			<input class="cbi-button cbi-button-apply1" name="get" value="Get" type="button" onclick="get_cord()" />
+		</div>
+	</div>
+
+	<div class="cbi-section-descr"><%=self.description%></div>
+	<div class="cbi-section-node" style="padding: 0px 0px 20px 120px;">
+		<img title="Geofencing" style="border: 3px solid #e5e5e5;" src="/luci-static/resources/icons/geofencing.png">
+	</div>
+	<div class="disclaimer_msg" style="display:inline-block;width:100%">
+		<span>* To receive SMS or email when entering or leaving geofence zone, go to Events reporting page and configure GPS event type.</span>
+	</div>
+</fieldset>

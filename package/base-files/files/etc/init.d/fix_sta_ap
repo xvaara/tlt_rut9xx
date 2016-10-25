@@ -1,0 +1,67 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+
+START=88
+
+STA_ENABLED=0
+AP_DISABLED=0
+
+check_wifi_wan(){
+	local ifname enabled
+	config_get ifname $1 "ifname"
+	if [ "$ifname" = "wlan0" ]; then
+		config_get enabled $1 "enabled" "1"
+
+		if [ "$enabled" -eq "1" ]; then
+			logger -t "fix_sta_ap" "Starting"
+			/sbin/fix_sta_ap.sh &
+		fi
+	fi
+}
+
+#Tikriname ar useris neisjunge sta wifi nustatymuose
+check_wifi_enabled(){
+	local mode
+	config_get mode $1 "mode"
+
+	case "$mode" in
+		"sta")
+			config_get STA_ENABLED $1 "user_enable" "1"
+		;;
+		"ap")
+			config_get AP_DISABLED $1 "disabled" "0"
+		;;
+	esac
+}
+
+del_stopped(){
+	local mode user_enable
+	config_get mode $1 "mode"
+	if [ "$mode" = "sta" ]; then
+		config_get user_enable $1 "user_enable" 0
+		
+		uci -q delete wireless.$1.stopped
+		[ $user_enable -eq 1 ] && uci -q delete wireless.$1.disabled
+		uci commit
+	fi
+}
+
+
+
+start(){
+	#Jei STA isjungiamas wifi config, programos nepaleidziame
+	config_load "wireless"
+	config_foreach check_wifi_enabled "wifi-iface"	
+	[ $STA_ENABLED -ne 1 -o $AP_DISABLED -ne 0 ] && return
+	
+	config_load "network"
+	config_foreach check_wifi_wan "interface"
+}
+
+stop(){
+	config_load "wireless"
+	config_foreach del_stopped "wifi-iface"
+	killall -9 fix_sta_ap.sh
+		
+}

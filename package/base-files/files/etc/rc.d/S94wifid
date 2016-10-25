@@ -1,0 +1,69 @@
+#!/bin/sh /etc/rc.common
+
+# Copyright (C) 2013 Teltonika
+
+START=94
+STOP=45
+DAEMON=/usr/sbin/wifid
+ARGS=""
+
+boot() {
+	/sbin/reload_config
+	start
+}
+
+test -x $DAEMON || exit 0
+
+start_instance() {
+	local config="$1"
+	local enabled=""
+	local debug=""
+	local port=""
+
+	config_get enabled "$config" enabled
+	config_get debug "$config" debug
+	config_get port "$config" port
+	
+	if [ "$enabled" != "1" ]
+	then
+		exit 0
+	fi
+	
+	if [ "$debug" == "1" ]
+	then
+		debug="-d"
+	else
+		debug=""
+	fi
+	
+	ARGS="-p $port $debug"
+	#/sbin/start-stop-daemon -S -q -x $DAEMON -- $ARGS
+	/usr/sbin/wifid $ARGS
+}
+
+stop_instance() {
+	local pid=`pgrep wifid`
+	kill -9 $pid > /dev/null 2>&1
+	rm -r /var/lock/wifid* > /dev/null 2>&1
+}
+
+start() {
+# FIXME: must be fixed
+# 	local num=`ps -w | grep wifid | grep -v -c "grep wifid"`
+# 	
+# 	if [ "$num" == "2" ]
+# 	then
+ 		config_load 'wifid'
+ 		config_foreach start_instance 'wifid'
+# 	fi
+}
+
+stop() {
+	stop_instance
+}
+
+restart() {
+	stop_instance
+	config_load 'wifid'
+	config_foreach start_instance 'wifid'
+}

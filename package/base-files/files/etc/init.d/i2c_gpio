@@ -1,0 +1,52 @@
+#!/bin/sh /etc/rc.common
+
+STOP=98
+
+start()
+{
+	#Init i2c gpio expander
+	#Moved to mach-tlt-rut900 file
+	#echo "pca9535 0x74" > /sys/bus/i2c/devices/i2c-0/new_device 2>/dev/null
+	#if [ "$?" -ne 0 ]; then
+	#	logger -t $0 "i2c gpio expander init failed"
+	#fi
+	
+	#Init pins
+	#SIM pin is used only when SIM2 ir requered
+	#/sbin/gpio.sh "export"	"SIM"
+	#/sbin/gpio.sh "dirout"	"SIM"
+	/sbin/gpio.sh "export"	"DOUT1"
+	/sbin/gpio.sh "dirout"	"DOUT1"
+	/sbin/gpio.sh "export"	"DOUT2"
+	/sbin/gpio.sh "dirout"	"DOUT2"
+	/sbin/gpio.sh "export"	"DIN1"
+	/sbin/gpio.sh "dirin"	"DIN1"
+	/sbin/gpio.sh "export"	"DIN2"
+	/sbin/gpio.sh "dirin"	"DIN2"
+	#Moved to pca953x driver to speed up modem starup
+	#/sbin/gpio.sh "export"	"MON"
+	#/sbin/gpio.sh "dirout"	"MON"
+	#/sbin/gpio.sh "export"	"MRST"
+	#/sbin/gpio.sh "dirout"	"MRST"
+	/sbin/gpio.sh "export"	"SDCS"
+	/sbin/gpio.sh "dirout"	"SDCS"
+	/sbin/gpio.sh "export"	"RS485_R"
+	#While hw is not perfect
+	/sbin/gpio.sh "dirout"	"RS485_R"
+	echo 0 > /sys/class/gpio/gpio63/value
+	
+	#Init RS485 driver pin
+	echo 0 > /sys/class/gpio/export
+	echo "out" > /sys/class/gpio/gpio0/direction
+	echo 1 > /sys/class/gpio/gpio0/value
+}
+
+stop()
+{
+	#Reset i2c gpio expander
+	RESET_PIN=21
+	. /lib/teltonika-gpio-functions.sh
+	gpio_export_tlt $RESET_PIN
+	gpio_setdir_tlt $RESET_PIN out
+	gpio_write_tlt $RESET_PIN 1
+}

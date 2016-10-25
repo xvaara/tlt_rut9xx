@@ -1,0 +1,8 @@
+<div class="cbi-value" id="cbi-<%=self.config.."-"..section.."-"..self.option%>">
+	<label class="cbi-value-title" <%= attr("for", cbid)%>>
+		<span  style="color: rgb(64, 64, 64);" <% if self.description and #self.description > 0 then %> onmouseover="ShowHint(this,'<%=self.description%>')" onmouseout="HideHint(this)" <% end %> ><%=self.title%> </span>
+	</label>
+	<textarea class="cbi-input-textarea" <% if not self.size then %> style="width: 100%; <% if self.height then %>height: <%=self.height%>px;<% end %> "<% else %> cols="<%=self.size%>"<% end %> onchange="cbi_d_update(this.id)"<%= attr("name", cbid) .. attr("id", cbid) .. ifattr(self.rows, "rows") .. ifattr(self.wrap, "wrap").. ifattr(self.maxlength, "maxlength") %>>
+		<%-=pcdata(self:cfgvalue(section))-%>
+	</textarea>
+<div>

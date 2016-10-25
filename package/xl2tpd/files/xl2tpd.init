@@ -1,0 +1,98 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2010 OpenWrt.org
+
+START=60
+USE_PROCD=1
+DAEMON=xl2tpd
+BIN=/usr/sbin/$DAEMON
+DEFAULT=/etc/default/$DAEMON
+RUN_D=/var/run
+PID_F=$RUN_D/$DAEMON.pid
+CONFIG=/var/etc/xl2tpd.conf
+CHAP_SECRETS=/var/etc/chap-secrets
+client_started=0
+
+setup_login() {
+	local section="$1"
+
+	config_get username "$section" username
+	config_get password "$section" password
+	[ -n "$username" ] || return 0
+	[ -n "$password" ] || return 0
+
+	sed -i "/xl2tp-server/d" $CHAP_SECRETS
+	echo "$username xl2tp-server $password *" >> $CHAP_SECRETS
+}
+
+setup_config() {
+	local section="$1"
+
+	config_get enabled "$section" enabled 0
+	[ "$enabled" -eq 0 ] && return 1
+
+	mkdir -p /var/etc
+	cp /etc/xl2tpd/xl2tpd.conf $CONFIG
+
+	config_get localip "$section" localip
+	config_get remoteip "$section" remoteip
+	[ -n "$localip" ] && echo "local ip = $localip" >> $CONFIG
+	[ -n "$remoteip" ] && echo "ip range = $remoteip" >> $CONFIG
+	return 0
+}
+
+start_xl2tpd_for_client() {
+	logger "l2tp: starting $DAEMON for clients"
+	#[ -f $DEFAULT ] && . $DEFAULT
+	mkdir -p "$RUN_D/$DAEMON"
+	for m in arc4 sha1_generic slhc crc-ccitt ppp_generic ppp_async ppp_mppe; do
+		insmod $m >/dev/null 2>&1
+	done
+	procd_open_instance
+	procd_set_param command $BIN -D -l
+	procd_set_param respawn
+	procd_close_instance
+}
+
+start_xl2tpd() {
+	#[ -f $DEFAULT ] && . $DEFAULT
+	mkdir -p "$RUN_D/$DAEMON"
+	for m in arc4 sha1_generic slhc crc-ccitt ppp_generic ppp_async ppp_mppe; do
+		insmod $m >/dev/null 2>&1
+	done
+	ln -sfn $CHAP_SECRETS /etc/ppp/chap-secrets
+	procd_open_instance
+	procd_set_param command $BIN -D -l -c $CONFIG
+	procd_set_param respawn
+	procd_close_instance
+}
+
+check_clients() {
+	local section="$1"
+	[ "$client_started" = "1" ] && return 1
+
+	config_get proto "$section" proto
+	config_get enabled "$section" enabled
+	config_get name "$section" _name
+	if [ "$proto" = "l2tp" -a "$enabled" != 0 ]; then
+		start_xl2tpd_for_client
+		ifup $name
+		client_started=1
+	fi
+}
+
+start_service() {
+	config_load xl2tpd
+	#setup_config xl2tpd || return
+	if setup_config xl2tpd; then
+		config_foreach setup_login login
+		start_xl2tpd
+	else
+		config_load network
+		config_foreach check_clients interface
+	fi
+}
+
+reload_service(){
+	stop
+	start
+}

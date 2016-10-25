@@ -1,0 +1,4 @@
+#!/bin/sh
+/sbin/crt_openvpn.sh r &
+
+exit 0

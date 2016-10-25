@@ -1,0 +1,30 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2014 Teltonika
+
+START=99
+STOP=99
+FUNC_NAME="hostblock"
+
+start() {
+	/usr/sbin/$FUNC_NAME.sh start &
+}
+
+stop() {
+	#Kill if script is stuck (e.g. while waiting for WAN IP)
+	all_pids=`pidof hostblock.sh`
+	if [ -n "$1" ]; then
+		kill_pids="${all_pids/$1/}"
+	else
+		kill_pids=$all_pids
+	fi
+	if [ -n "$kill_pids" ]; then
+		kill -9 $kill_pids
+	fi
+	
+	/usr/sbin/$FUNC_NAME.sh stop 
+}
+
+restart() {
+	stop
+	start
+}

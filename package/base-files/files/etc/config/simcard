@@ -1,0 +1,18 @@
+config sim1 'sim1'
+	option proto '3g'
+	option dialnumber '*99#'
+	option ifname '3g-ppp'
+	
+config sim2 'sim2'
+	option proto '3g'
+	option dialnumber '*99#'
+	option ifname '3g-ppp'
+
+config interface 'ppp'
+
+config option 'option'
+
+config rules 'rules'
+
+config simcard 'simcard'
+	option default 'sim1'

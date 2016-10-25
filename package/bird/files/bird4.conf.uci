@@ -1,0 +1,32 @@
+config bird 'bird'
+	option enabled '0'
+	option use_UCI_config '1'
+	option UCI_config_file '/tmp/bird4.conf'
+
+config global 'global'
+	option log_file '/tmp/bird4.log'
+	option router_id '192.168.1.1'
+	option debug 'off'
+
+config kernel 'kernel'
+	option disabled '0'
+	option import 'all'
+	option export 'all'
+	option scan_time '20'
+	option learn '0'
+	option persist '0'
+
+config device 'device'
+	option disabled '0'
+	option scan_time '10'
+
+config static 'static'
+	option disabled '1'
+
+config ospf 'ospf1'
+	option disabled '1'
+	option stub '0'
+	option rfc1583compat '0'
+	option import 'all'
+	option export 'all'
+

@@ -1,0 +1,36 @@
+_SECTIONS=""
+DDNS_ENABLED=""
+
+load_settings() {
+        local service
+        local enabled
+
+        service="$1"
+        config_get enabled "$1" enabled
+
+        if [ "$enabled" == "1" ]
+        then
+                DDNS_SECTIONS="$service $DDNS_SECTIONS"
+                DDNS_ENABLED="1"
+        fi
+}
+
+config_load ddns
+config_foreach load_settings service
+
+# there are other ACTIONs like ifupdate we don't need
+# so parse dynamic_dns_functions.sh only when needed
+case "$ACTION" in
+        ifup)
+                if [ -n "$DDNS_ENABLED" ]
+                then
+                        . /usr/lib/ddns/dynamic_dns_functions.sh
+                        /etc/init.d/ddns enable && start_daemon_for_all_ddns_sections "$INTERFACE" "$DDNS_SECTIONS"
+                fi
+                ;;
+        ifdown)
+                . /usr/lib/ddns/dynamic_dns_functions.sh
+                /etc/init.d/ddns disable && stop_daemon_for_all_ddns_sections "$INTERFACE"
+                ;;
+esac
+

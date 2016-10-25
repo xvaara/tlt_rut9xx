@@ -1,0 +1,35 @@
+config system 'system'
+	option routername 'Teltonika'
+	option hostname 'Teltonika'
+	option timezone 'UTC'
+	option conloglevel '8'
+	option log_type 'circular'
+	option log_buffer_size '128'
+	option enable_pppd_debug '0'
+	option enable_chat_log '1'
+	option enable_gsmd_log '1'
+	option enable_hotplug_log '1'
+	option enable_luci_reload_log '0'
+	option enable_sim_switch_log '0'
+
+config button
+	option button 'reset'
+	option action 'released'
+	option handler 'reboot'
+	option min '0'
+	option max '5'
+
+config button
+	option button 'reset'
+	option action 'released'
+	option handler 'firstboot && reboot'
+	option min '5'
+	option max '30'
+
+config device_info 'device_info'
+
+config leds
+	option enable '1'
+
+config ipv6 'ipv6'
+	option enable '0'

@@ -1,0 +1,145 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008-2011 Jo-Philipp Wich <xm@subsignal.org>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: index.htm 8408 2012-04-02 22:50:26Z jow $
+
+-%>
+
+<%
+	require "luci.fs"
+	require "luci.tools.status"
+	luci.util = require "luci.util"
+
+	local gdin1 = luci.util.trim(luci.sys.exec("gpio.sh get DIN1"))
+	local gdin2 = luci.util.trim(luci.sys.exec("gpio.sh get DIN2"))
+	local ganalog = luci.util.trim(luci.sys.exec("cat /sys/class/hwmon/hwmon0/device/in0_input"))
+	local gdout1 = luci.util.trim(luci.sys.exec("gpio.sh get DOUT1"))
+	local gdout2 = luci.util.trim(luci.sys.exec("gpio.sh get DOUT2"))
+	function get_config(out)
+		return luci.util.trim(luci.sys.exec("uci get ioman.ioman.active_"..out.."_status"))
+	end
+	local open_collector_output_cfg = get_config("DOUT1")
+	local relay_output_cfg = get_config("DOUT2")
+
+	if luci.http.formvalue("status") == "1" then
+
+		if gdin1 == "1" then
+			din1 = "Open"
+		elseif gdin1 == "0" then
+			din1 = "Shorted"
+		end
+
+		if gdin2 == "1" then
+			din2 = 'Low level'
+		elseif gdin2 == "0" then
+			din2 = 'High level'
+		end
+
+		if ganalog >= "0" then
+			analog = string.format("%.2f",ganalog / 1000) .. " V"
+		else
+			analog = "N/A"
+		end
+
+		if open_collector_output_cfg == "1" then
+			if gdout1 == "1" then
+				dout1 = "Active (Low level)"
+			elseif gdout1 == "0" then
+				dout1 = "Inactive (High level)"
+			end
+		else
+			if gdout1 == "1" then
+				dout1 = "Inactive (Low level)"
+			elseif gdout1 == "0" then
+				dout1 = "Active (High level)"
+			end
+		end
+
+		if relay_output_cfg == "1" then
+			if gdout2 == "1" then
+				dout2 = "Active (Contacts closed)"
+			elseif gdout2 == "0" then
+				dout2 = "Inactive (Contacts open)"
+			end
+		else
+			if gdout2 == "1" then
+				dout2 = "Inactive (Contacts closed)"
+			elseif gdout2 == "0" then
+				dout2 = "Active (Contacts open)"
+			end
+		end
+
+		local rv = {
+			din1 = din1,
+			din2 = din2,
+			analog = analog,
+			dout1 = dout1,
+			dout2 = dout2
+		}
+		luci.http.prepare_content("application/json")
+		luci.http.write_json(rv)
+		return
+	end
+	local system, model = luci.sys.sysinfo()
+-%>
+
+<%+header%>
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">//<![CDATA[
+
+function refreshPage(){
+	XHR.get('<%=luci.dispatcher.build_url("admin", "services", "input-output", "status")%>', { status: 1 },
+		function(x, info)
+		{
+			var e;
+			if (e = document.getElementById('DIN1'))
+				(info.din1 ) ? e.innerHTML = info.din1 : e.innerHTML = "N/A";
+			if (e = document.getElementById('DIN2'))
+				(info.din2) ? e.innerHTML = info.din2 : e.innerHTML = "N/A";
+			if (e = document.getElementById('DOUT1'))
+				(info.dout1) ? e.innerHTML = info.dout1 : e.innerHTML = "N/A";
+			if (e = document.getElementById('DOUT2'))
+				(info.dout2) ? e.innerHTML = info.dout2 : e.innerHTML = "N/A";
+			if (e = document.getElementById('ANALOG'))
+				(info.analog) ? e.innerHTML = info.analog : e.innerHTML = "N/A";
+		}
+	);
+}
+AddWindowOnLoadEvent(refreshPage);
+//]]></script>
+
+<h2><a id="content" name="content"><%=translate("Input/Output Status")%></a></h2>
+<fieldset class="cbi-section">
+	<table id="3gTable" width="100%" cellspacing="10">
+		<tr><td colspan="2"><b><%=translate("Type")%></b></td> <td><b><%=translate("Associated pins")%></b></td> <td><b><%=translate("State")%></b></td></tr>
+		<tr><td width="5%"><img id='port1' src="<%=resource%>/icons/melyna.png" width="20px" /></td><td width="33%"><%=translate("Digital input")%></td><td>1,6</td><td id="DIN1"><%: - %></td></tr>
+		<tr><td width="5%"><img id='port1' src="<%=resource%>/icons/zalia.png" width="20px" /></td><td width="33%"><%=translate("Digital galvanically isolated input")%></td><td>2,7</td><td id="DIN2"><%: - %></td></tr>
+		<tr><td width="5%"><img id='port1' src="<%=resource%>/icons/melsva.png" width="20px" /></td><td width="33%"><%=translate("Analog input")%></td><td>9,6</td><td id="ANALOG"><%: - %></td></tr>
+		<tr><td width="5%"><img id='port1' src="<%=resource%>/icons/oranzine.png" width="20px" /></td><td width="33%"><%=translate("Open collector output")%></td><td>3,4,8</td><td id="DOUT1"><%: - %></td></tr>
+		<tr><td width="5%"><img id='port1' src="<%=resource%>/icons/violetine.png" width="20px" /></td><td width="33%"><%=translate("Relay output")%></td><td>5,10</td><td id="DOUT2"><%: - %></td></tr>
+	</table>
+</fieldset>
+<fieldset class="cbi-section">
+	<div style=" padding:3px; width:100%; height:100%; align:left;">
+		<div style="float:right; margin-right: 10px; align:left; background-image:url('<%=resource%>/icons/input_output.png'); background-size: 100%; background-repeat:no-repeat; height: 200px; width:235px;" id="PRT">
+		</div>
+		<div style="align:left; width:620px; float:left;">
+			<table id="inputtable" width="100%" cellspacing="10">
+				<tr><td width="15px" style="background-image:url('<%=resource%>/icons/melyna.png'); text-align:center;"><%:1.%></td><td><%=translate("Digital input (only for passive sensors)")%></td>			<td width="15px" style="background-image:url('<%=resource%>/icons/melyna.png'); text-align:center;"><%:6.%></td><td><%=translate("GND (digital & analog input)")%></td> </tr>
+				<tr><td width="15px" style="background-image:url('<%=resource%>/icons/zalia.png'); text-align:center;"><%:2.%></td><td><%=translate('Digital isolated input (0..4V: low logic level / 9..30V: high logic level)')%></td>	<td width="15px" style="background-image:url('<%=resource%>/icons/zalia.png'); text-align:center;"><%:7.%></td><td><%=translate("GND (digital isolated input)")%></td> </tr>
+				<tr><td width="15px" style="background-image:url('<%=resource%>/icons/oranzine.png'); text-align:center;"><%:3.%></td><td><%=translate("Open collector output (0.3A Max)")%></td>		<td width="15px" style="background-image:url('<%=resource%>/icons/oranzine.png'); text-align:center;"><%:8.%></td><td><%=translate("GND (OC output)")%></td> </tr>
+				<tr><td width="15px" style="background-image:url('<%=resource%>/icons/oranzine.png'); text-align:center;"><%:4.%></td><td><%=translate("External VCC (0-30V)")%></td>			<td width="15px" style="background-image:url('<%=resource%>/icons/melsva.png'); text-align:center;"><%:9.%></td><td><%=translate("Analog input (0-24V)")%></td></td></tr>
+				<tr><td width="15px" style="background-image:url('<%=resource%>/icons/violetine.png'); text-align:center;"><%:5.%></td><td><%=translate("Relay output (COM) (24V, 4A)")%></td>	<td width="15px" style="background-image:url('<%=resource%>/icons/violetine.png'); text-align:center;"><%:10.%></td><td><%=translate("Relay output (NO)")%></td></tr>
+			</table>
+		</div>
+	</div>
+</fieldset>
+<%+footer%>

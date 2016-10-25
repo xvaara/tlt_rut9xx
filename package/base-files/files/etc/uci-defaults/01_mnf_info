@@ -1,0 +1,83 @@
+#!/bin/sh
+
+SECTION="hwinfo"
+CONFIG="hwinfo"
+
+baseN2dec(){ #usage: baseN2dec number <base> (default base is 32)
+	STRING=0123456789ABCDEFGHIJKLMNOPQRSTUV+/
+	i=$((${#1}-1));DEC=0;POS=1;BASE=${2:-32}
+	while ([ $i -ge 0 ]) do
+		VAL=${1:$i:1}
+		VAL=${STRING%${VAL}*}
+		VAL=${#VAL}
+		DEC=$(($VAL*$POS+$DEC))
+		POS=$(($BASE*$POS))
+		i=$(($i-1))
+	done
+	echo $DEC
+}
+
+dec2bin() {
+	DecNum=$1
+	Binary=
+	while [ $DecNum -ne 0 ]
+	do
+		Bit=$(expr $DecNum % 2)
+		Binary=$Bit$Binary
+		DecNum=$(expr $DecNum / 2)
+	done
+	echo -e "$Binary"
+}
+
+get_hw_functions() {
+	param_list="4p_conn panel_mnt term_block microsd in_out rs485 rs232 gps usb dual_sim"
+	
+	name=$(/sbin/mnf_info "name")
+	if [ -z "$name" -o ${#name} != 12 ]; then
+		echo "$0: Product code not found or not correct: $name"
+		return 1
+	fi
+	
+	hwcode=$(echo "$name" | head -c 9 | tail -c 2)
+	dec=$(baseN2dec "$hwcode")
+	bin=$(dec2bin "$dec")
+	binname=$(printf '%010d' $bin | sed -e 's/\(.\)/\1\n/g')
+	
+	#Create config section
+	uci set $CONFIG.$SECTION=$SECTION
+	
+	for bit in 1 2 3 4 5 6 7 8 9 10; do
+		if [ $(echo $binname | awk -v word=$bit '{print $word}') == 1 ];then
+			value=1
+		else
+			value=0
+		fi
+		param=$(echo $param_list | awk -v word=$bit '{print $word}')
+		
+		uci set $CONFIG.$SECTION.$param=$value
+	done
+	uci commit $CONFIG
+}
+
+get_hw_info() {
+	param=$(/sbin/mnf_info "sn")
+	[ -n "$param" -a ${#param} == 8 ] && uci set $CONFIG.$SECTION."serial"=$param
+	
+	param=$(/sbin/mnf_info "name")
+	[ -n "$param" -a ${#param} == 12 ] && uci set $CONFIG.$SECTION."mnf_code"=$param
+	
+	param=$(/sbin/mnf_info "batch")
+	[ -n "$param" -a ${#param} == 4 ] && uci set $CONFIG.$SECTION."batch"=$param
+	
+	param=$(/sbin/mnf_info "hwver")
+	[ -n "$param" -a ${#param} == 4 ] && uci set $CONFIG.$SECTION."hwver"=$param
+	
+	uci commit $CONFIG
+}
+
+# get device information
+echo "Reading device information"
+get_hw_functions
+get_hw_info
+
+exit 0

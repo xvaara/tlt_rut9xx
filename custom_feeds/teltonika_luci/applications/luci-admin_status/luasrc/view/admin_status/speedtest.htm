@@ -1,0 +1,1036 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008 Jo-Philipp Wich <xm@leipzig.freifunk.net>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: index.htm 8311 2012-02-19 15:11:23Z stargieg $
+
+-%>
+
+<%
+local uci = require "luci.model.uci".cursor()
+local ds = require "luci.dispatcher"
+local translate, translatef = luci.i18n.translate, luci.i18n.translatef
+local sys = require "luci.sys"
+
+step = tonumber(luci.http.formvalue("step"))
+
+function string:split( inSplitPattern, outResults )
+	if not outResults then
+		outResults = { }
+	end
+	local theStart = 1
+	local theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+	while theSplitStart do
+		table.insert( outResults, string.sub( self, theStart, theSplitStart-1 ) )
+		theStart = theSplitEnd + 1
+		theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+	end
+	table.insert( outResults, string.sub( self, theStart ) )
+	return outResults
+end
+
+function millisec() -- function to count milliseconds of current time
+	local t = io.popen("cat /proc/uptime")
+	time = t:read()
+	t:close()
+	time = time:split(" ")
+	return time[1]
+end
+
+function getItem(object, item, phrase) -- phrase=  symbols until number, function to get current row collum values and format it
+	object = object:split("\" ")
+	object[item] = object[item]:gsub("\"", "")
+	object[item] = object[item]:gsub(phrase , "")
+	return object[item]
+end
+
+function getUrl() -- function to get server address without subfolders
+	local gettingurl = getItem(server,1,"<server url="):split("/")
+	if #gettingurl >5 then
+		url = gettingurl[3].."/".. gettingurl[4]
+	else
+		url = gettingurl[3]
+	end
+	return url
+end
+
+function ping_test()
+	local server = luci.http.formvalue("server_to_connect")
+	local host = getItem(server, 1, "<server url=")
+	local start = millisec()
+	y = io.popen("wget -O - \""..host .. "\" -q") -- connects to the server
+	local r = 1
+	local c = {}
+	for line in y:lines() do
+		c[r] = line
+		r = r + 1
+	end
+	y:close()
+	local finish = millisec() -- finish time in milliseconds
+	if c[1] == nil then
+		os.exit()
+	end
+	ping = string.format("%.0f",(finish - start)*100)
+end
+
+function distance (lat_user, lon_user, lat_destination, lon_destination) -- calculates disance between 2 points
+	local radius = 6371 --km
+	local dlat = math.rad(lat_destination - lat_user)
+	local dlon = math.rad(lon_destination - lon_user)
+	local a = ( math.sin(dlat / 2) * math.sin(dlat / 2 ) + math.cos(math.rad(lat_user)) * math.cos(math.rad(lat_destination)) * math.sin(dlon / 2) * math.sin(dlon / 2))
+	local c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+	d = radius * c
+	return d
+end
+
+
+
+function getconfig() -- downloads user information
+	local f = io.popen('wget -O - "http://www.speedtest.net/speedtest-config.php" -q')
+	local files = {}
+	local configxml = {}
+	local k = 1
+	for line in f:lines() do
+		files[k] = line
+		k = k + 1
+	end
+	f:close()
+	if files[1] == nil then -- if download fails the program will shutdown
+		--os.exit()
+		return "1"
+	else
+		--putting information to variables
+		client = string.sub(files[3], 9, -4)
+		return "0"
+	end
+end
+
+function get_servers(addr)
+	local f = io.popen('wget -O - '.. addr ..' -q')
+	local temp_servers = {}
+	local i = 1
+	for line in f:lines() do
+		if line:find('country="') then
+			temp_servers[i] = line
+			i = i + 1
+		end
+	end
+	f:close()
+	return temp_servers
+end
+
+function closestServers() -- function that downloads servers list, finds closests servers near user
+	local ln = "http://rms.teltonika.lt/speedtest/speedtest.php"
+	local b_ln = "http://c.speedtest.net/speedtest-servers-static.php"
+	closests_servers = {}
+	local distances = {}
+	servers = get_servers(ln)
+	if #servers < 1 or servers[1] == "0" then
+		servers = get_servers(b_ln)
+	end
+	local in_list = false
+
+
+-- calculating servers distances
+	for i = 1 , #servers do
+		distances[i] = distance(getItem(client, 2, "lat="), getItem(client, 3, "lon="), getItem(servers[i], 2, "lat="), getItem(servers[i], 3, "lon="))
+		i = i + 1
+	end
+
+-- finds closests servers
+	for y = 1, 4 do
+		local index = 1
+		local min = 999999
+		for t = 1, #distances do -- putting servers in to the list with lowest distances
+			in_list = false
+			if distances[t] < min then
+				for e = 1, #closests_servers do -- check or server is not in the list
+					if getItem(servers[closests_servers[e]], 8, "id=") == getItem(servers[t], 8, "id=") then
+						in_list = true
+					end
+				end
+				if in_list == false then
+					index = t
+					min = distances[t]
+				end
+			end
+		end
+		closests_servers[y] = index
+		if y == #servers then
+			break
+		end
+	end
+-- putting all server information
+	server_info = {}
+	for i = 1, #closests_servers do
+		server_info[i] = servers[closests_servers[i]]
+	end
+end
+
+function fastestServer() --finds server with lowest ping
+	local times = {}
+	for a = 1, #closests_servers-1 do
+		host = getItem(servers[closests_servers[a]], 1, "<server url=") --gets server url
+		local start = millisec() --start time in milliseconds
+		y = io.popen("wget -O - \""..host .. "\" -q") -- connects to the server
+		local r = 1
+		local c = {}
+		for line in y:lines() do
+			c[r] = line
+			r = r + 1
+		end
+		y:close()
+		local finish = millisec() -- finish time in milliseconds
+		if c[1] == nill then --if cant connect to server sets default ping
+			times[a] = 9999999999.99
+		else
+			local time = (finish - start) -- calculates the passage of time
+			times[a] = time
+		end
+	end
+--finds server with lowest ping
+	local min = 9999999999999
+	local index = 1
+	for u = 1, #closests_servers-1 do
+		if times[u] < min then
+			min = times[u]
+			index = u
+			ping = tonumber(string.format("%.0f",times[u]*100))
+		end
+	end
+	connecting_to = (getItem(servers[closests_servers[index]], 7, "sponsor=").." ".. getItem(servers[closests_servers[index]], 4, "name=").." "..  getItem(servers[closests_servers[index]], 5, "country="))
+	if ping == 999999999999 then -- if cant connect to any server the program will shutdown
+		os.exit()
+	end
+	server = servers[closests_servers[index]] -- all information about fastest server
+	return server
+end
+
+function downloadSpeed()
+	local sizes = {350,500,750,1000,2000,2500,3000,3500,4000} -- sizes in file url
+	local memory = {245388,505544,1118012,1986284,7907740,12407926,17816816,24262167,31625365} -- file sizes in bytes
+	dspeed = 0
+	for u = 1, #sizes do --downloading files
+		h = table.getn(sizes)
+		servers = {}
+--downloading files
+		local y = io.popen('curl "http://'..getUrl()..'/speedtest/random'..sizes[u]..'x'..sizes[u]..'.jpg" 2> /tmp/speed_results.txt')
+		local packet = {}
+		local k = 1
+		local start = millisec() -- time in milliseconds when download starts
+		for line in y:lines() do
+			servers[k] = line
+			k = k + 1
+		end
+		local finish = millisec() -- time in milliseconds when download finish
+		y:close()
+--calculates the passage of time
+		time = (finish-start)/1,4
+		time = (string.format("%.1f",time))
+		time = tonumber(time)
+		if time > 8 or u == h  then --if downloading file time will last more than 7 seconds or all files will be downloaded the download speed will be calculated
+--download speed will be calculated by the last downloaded file
+			dspeed = tonumber(string.format("%.2f",(string.format("%.0f",(memory[u]/time))*8/1000000*1.15)))
+			break
+		end
+	end
+	os.execute("rm /tmp/speed_results.txt")
+end
+
+function uploadSpeed()
+	uspeed = 0
+	local count = 0
+	local sizes = {250000,500000,1000000,2000000,4000000,8000000,16000000,32000000} -- uploading files sizes in bytes
+	local total_space = 0
+	local time_limit = 8
+	local full_time = 0
+	local time = 0
+-- generating first file 175000 bytes
+	size= string.format("%.0f",sizes[1]/2/36)
+	local chars ="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	local file = io.open("/tmp/speedtestdata0.txt", "w")
+	file:write(string.rep(chars,size))
+	file:close()
+
+-- generating and uploading
+	for u = 1, #sizes do -- uploading files until file upload time reaches time limit or all files was uploaded
+		if time_limit > time then
+			count = count + 1
+-- generating new file
+			file = io.open("/tmp/speedtestdata".. u ..".txt", "a+")
+			file:write(os.execute("cat /tmp/speedtestdata".. u-1 ..".txt >> /tmp/speedtestdata".. u ..".txt && cat /tmp/speedtestdata".. u-1 ..".txt >> /tmp/speedtestdata".. u ..".txt"))
+			file:close()
+			local start = millisec() --time in milliseconds when upload start
+--uploading file
+			local upload = io.popen('curl --form fileupload=@/tmp/speedtestdata'.. u ..'.txt "'..  getItem(server,1,"<server url=") ..'" 2> /tmp/speed_results.txt')
+			if upload == nil then
+				os.exit()
+			end
+			upload:close()
+			local finish = millisec()-0,2 --time in milliseconds when upload finished
+			os.execute("rm /tmp/speedtestdata".. u-1 ..".txt") -- deleting older files, clearing memory
+			time = tonumber(string.format("%.1f", (finish - start))) -- calculates the passage of time
+		else
+			break
+		end
+	end
+	os.execute("rm /tmp/speedtestdata*.txt") -- cleaning all upload files
+	os.execute("rm /tmp/speed_results.txt")
+-- calculates upload speed
+	uspeed = string.format("%.2f",(sizes[count] / time / 1000000 * 8))
+end
+
+function clean()
+	p = io.popen("ps | grep 'speedtest' | grep -v grep | awk '{print $1}'")
+	proc = p:read("*all")
+	proc = proc:gsub("\n", " ")
+	p:close()
+	proc = proc:split(" ")
+	for i = 1 , #proc -1 do
+		os.execute("kill ".. proc[i] .."")
+	end
+end
+
+step = tonumber(luci.http.formvalue("step"))
+if step == 1 then
+	local config_data_exist = getconfig()
+	if tonumber(config_data_exist) == 0 then
+		closestServers()
+		fastestServer()
+		rv = {
+			connection = connecting_to,
+			ping_to_server = ping,
+			server_url = server,
+			internet = "1"
+		}
+	else
+		rv = {
+			internet = "0"
+		}
+	end
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 2 then
+	clean()
+	server = luci.http.formvalue("url")
+	downloadSpeed()
+	rv = {
+		downloadspeed = dspeed
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 3 then
+	clean()
+	server = luci.http.formvalue("url")
+	upload = uploadSpeed()
+	rv = {
+		uploadspeed = uspeed
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+
+if step == 4 then
+	local config_data_exist1 = getconfig()
+	if tonumber(config_data_exist1) == 0 then
+		closestServers()
+		server_list = {}
+		for u = 1 , #closests_servers do
+			server_list[u] = (getItem(servers[closests_servers[u]], 7, "sponsor=") .. " " .. getItem(servers[closests_servers[u]], 4, "name=") .. " " .. getItem(servers[closests_servers[u]], 5, "country="))
+		end
+		id = {}
+		for e = 1 , #closests_servers do
+			id[e] = getItem(servers[closests_servers[e]], 8, "id=")
+		end
+		rv = {
+			servers_information = server_info,
+			list = closests_servers,
+			serv = server_list,
+			serverid = id,
+			internet = "1"
+		}
+	else
+		rv = {
+			servers_information = server_info,
+			list = closests_servers,
+			serv = server_list,
+			serverid = id,
+			internet = "0"
+			}
+	end
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 5 then
+	local config_data_exist2 = getconfig()
+	if tonumber(config_data_exist2) == 0 then
+		ping_test()
+		rv = {
+			ping_to_server = ping,
+			internet = "1"
+		}
+	else
+		rv = {
+			internet = "0"
+		}
+	end
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 6 then
+	clean()
+	server = luci.http.formvalue("server_to_connect")
+	downloadSpeed()
+	rv = {
+		downloadspeed = dspeed
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 7 then
+	clean()
+	server = luci.http.formvalue("server_to_connect")
+	uploadSpeed()
+	rv = {
+		uploadspeed = uspeed
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 8 then
+	local s = io.popen("cat /tmp/speed_results.txt | awk '{print $NF}' | tail -1")
+	current_spd = s:read()
+	s:close()
+	rv = {
+		current_speed = current_spd
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+if step == 9 then
+	clean()
+	rv = {
+		status = "done"
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+
+%>
+
+
+<%+header%>
+<script type="text/javascript" src="<%=resource%>/speedtest.js"></script>
+<script type="text/javascript">
+
+var servers_list = [];
+var servers_info = [];
+var server_id = [];
+var current_speed = 0;
+var last_connection = "";
+var last_server_name = "";
+var counter = 0;
+var times_zero = 0;
+var speeds = null;
+var animation = null;
+var status = "none";
+function disable(off_on){
+	if(off_on == 0){
+		for( r = 1; r <= 4; r++){
+			document.getElementById(("button"+r)).disabled = true;
+			document.getElementById("button"+r).style.color = '#B8B8B8';
+			document.getElementById(("server"+r)).style.color = '#B8B8B8';
+		}
+		document.getElementById("start").disabled = true;
+		document.getElementById("get_servers").disabled = true;
+		document.getElementById("restart").disabled = true;
+		document.getElementById("start").style.color = '#B8B8B8';
+		document.getElementById("get_servers").style.color = '#B8B8B8';
+		document.getElementById("restart").style.color = '#B8B8B8';
+	}
+	if(off_on == 1){
+		if(document.getElementById("server1").innerHTML != "Server 1" && document.getElementById("server2").innerHTML != "Server 2"){
+			for( r = 1; r <= 4; r++){
+				if(document.getElementById("server"+r).innerHTML.indexOf("Server ")){
+					document.getElementById(("button"+r)).disabled = false;
+					document.getElementById("button"+r).style.color = '#404040';
+					document.getElementById(("server"+r)).style.color = '#404040';
+				}
+			}
+		}
+		document.getElementById("start").style.color = '#404040';
+		document.getElementById("get_servers").style.color = '#404040';
+		document.getElementById("restart").style.color = '#404040';
+		document.getElementById("start").disabled = false;
+		document.getElementById("get_servers").disabled = false;
+		document.getElementById("restart").disabled = false;
+		}
+}
+
+function auto_test(){
+	document.getElementById("err_message").style.display = 'none';
+	current_speed = 0;
+	counter = 0;
+	times_zero = 0;
+	status = "none";
+	Gauge.Collection.get('gauge1').setValue(0);
+	document.getElementById('status').style.display = "";
+	document.getElementById('restart').type = "hidden";
+	document.getElementById('connecting').style.color = '#B8B8B8';
+	document.getElementById('ping').style.color = '#B8B8B8';
+	document.getElementById('download').style.color = '#B8B8B8';
+	document.getElementById('upload').style.color = '#B8B8B8';
+	document.getElementById("connecting").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + " Selecting best server based on ping ...";
+	document.getElementById("ping").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">'  + ' ms';
+	document.getElementById("download").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">'  + ' Mbits/s';
+	document.getElementById("upload").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + ' Mbits/s';
+	disable(0);
+
+	document.getElementById('action').innerHTML = "Selecting best server based on ping ..";
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 1 },
+	function(x, info){
+		try{
+			if (info.internet == "1"){
+				if(info.connection.length > 30){
+					info.connection = info.connection.substring(0,30) + "...";
+				}
+				var div = document.getElementById('connecting');
+				div.innerHTML = "<b>" + info.connection + "</b>";
+				document.getElementById("connecting").style.color = '#404040';
+				last_server_name = info.connection;
+				div = document.getElementById('ping');
+				div.innerHTML = "<b>" + info.ping_to_server + " ms" + "</b>";
+				document.getElementById("ping").style.color = '#404040';
+				last_connection = info.server_url;
+				}else {
+					error(3)
+				}
+
+			}catch(err){
+				location.href=location.href;
+			}
+		speeds = setInterval(function () {current_test_speed(1)}, 2000);
+		animation = setInterval(function () {meter_animation()}, 200);
+		document.getElementById('action').innerHTML = "Testing download speed ..";
+		XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 2, url: info.server_url },
+			function(c, download){
+				window.clearInterval(animation);
+				window.clearInterval(speeds);
+				times_zero = 0;
+				if(status != "err"){
+					speeds = setInterval(function () {current_test_speed(2)}, 2000);
+					animation = setInterval(function () {meter_animation()}, 200);
+					document.getElementById('action').innerHTML = "Testing upload speed ..";
+					XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 3, url: info.server_url },
+						function(c, upload){
+							window.clearInterval(animation);
+							window.clearInterval(speeds);
+							div = document.getElementById('upload');
+							div.innerHTML = div.innerHTML.replace('<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">','');
+							if(current_speed != 0){
+								document.getElementById('upload').innerHTML = "<b>" + current_speed + " Mbits/s" +"</b>";
+								document.getElementById("upload").style.color = '#404040';
+								document.getElementById('restart').type = "button";
+							}
+							else{
+								error(3);
+								return
+							}
+							document.getElementById('status').style.display = "none";
+							disable(1);
+							Gauge.Collection.get('gauge1').setValue(0);
+						}
+					);
+				}
+			}
+		);
+	}
+	);
+}
+
+
+
+function getservers(){
+	disable(0);
+	document.getElementById("err_message").style.display = 'none';
+	document.getElementById("server1").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById("server2").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById("server3").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById("server4").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById('status').style.display = "";
+	document.getElementById('action').innerHTML = "Recieving nearest servers around your location ..";
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 4 },
+		function(v, server_list){
+			document.getElementById('status').style.display = "none";
+			try{
+				if (server_list.internet == "1"){
+					for (i = 0; i < 4; i++){
+						var id = "server" + (i+1).toString();
+						var button = "button" + (i+1).toString();
+						if(server_list.serv.length -1 >= i){
+							if(server_list.serv[i].length > 30){
+								server_list.serv[i] = server_list.serv[i].substring(0,30) + "...";
+							}
+							document.getElementById(id).innerHTML = server_list.serv[i];
+							document.getElementById(button).type = "button";
+							servers_info [i] = server_list.serv[i];
+							servers_list[i] = server_list.servers_information[i];
+							server_id[i] = server_list.serverid[i];
+						}else{
+							document.getElementById(id).innerHTML = "Server " + (i+1);
+						}
+					}
+					disable(1);
+				}
+				else{error(0);}
+			}
+			catch(err){
+				location.href=location.href;
+				return
+			}}
+	);
+}
+
+
+function speedtest(which_server){
+	document.getElementById("err_message").style.display = 'none';
+	current_speed = 0;
+	counter = 0;
+	times_zero = 0;
+	status = "none";
+	Gauge.Collection.get('gauge1').setValue(0);
+	last_connection = servers_list[which_server];
+	disable(0);
+	document.getElementById('restart').type = "hidden";
+	document.getElementById('connecting').style.color = '#B8B8B8';
+	document.getElementById('ping').style.color = '#B8B8B8';
+	document.getElementById('download').style.color = '#B8B8B8';
+	document.getElementById('upload').style.color = '#B8B8B8';
+	document.getElementById("connecting").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById("ping").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + ' ms';
+	document.getElementById("download").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">'+' Mbits/s';
+	document.getElementById("upload").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + ' Mbits/s';
+	document.getElementById('status').style.display = "";
+	div = document.getElementById('connecting');
+	if(servers_info[which_server].length > 30){
+		servers_info[which_server] = servers_info[which_server].substring(0,30) + "...";
+	}
+	div.innerHTML = "<b>" + servers_info[which_server] + "</b>";
+	document.getElementById("connecting").style.color = '#404040';
+	last_server_name = servers_info[which_server];
+	document.getElementById('action').innerHTML = "Connecting to server ..";
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 5, server_to_connect: servers_list[which_server] },
+		function(v, test_ping){
+			try{
+				if (test_ping.internet == "1"){
+					div = document.getElementById('ping');
+					div.innerHTML = "<b>" + test_ping.ping_to_server + " ms" + "</b>";
+					document.getElementById("ping").style.color = '#404040';
+				}
+				else{
+					error(2);
+				}
+			}
+			catch(err){
+				location.href=location.href;//login page
+				return
+			}
+			speeds = setInterval(function () {current_test_speed(1)}, 2000);
+			animation = setInterval(function () {meter_animation()}, 200);
+			document.getElementById('action').innerHTML = "Testing download speed ..";
+			XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 6, server_to_connect: servers_list[which_server] },
+				function(v, test_download){
+					window.clearInterval(animation);
+					window.clearInterval(speeds);
+					times_zero = 0;
+					if(status != "err"){
+						speeds = setInterval(function () {current_test_speed(2)}, 2000);
+						animation = setInterval(function () {meter_animation()}, 200);
+						XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 7, server_to_connect: servers_list[which_server] },
+							function(v, test_upload){
+								window.clearInterval(animation);
+								window.clearInterval(speeds);
+								disable(1);
+								div.innerHTML = div.innerHTML.replace('<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">','');
+								if(current_speed != 0){
+									document.getElementById('upload').innerHTML = "<b>" + current_speed + " Mbits/s" +"</b>";
+									document.getElementById("upload").style.color = '#404040';
+									document.getElementById('restart').type = "button";
+								}
+								else{
+									error(3);
+									return
+								}
+								document.getElementById('status').style.display = "none";
+								Gauge.Collection.get('gauge1').setValue(0);
+							}
+						);
+					}
+				}
+			);
+		}
+	);
+}
+
+
+function current_test_speed(test){
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 8 },
+		function(v, current_internet){
+			if(test == 1){
+				if(isNaN(current_internet.current_speed[0]) || current_internet.current_speed != "" || current_internet.current_speed != " "){
+					//error(0);
+				}
+				if(!isNaN(current_internet.current_speed.slice(-1)) && current_internet.current_speed != 0){
+					var speed = (current_internet.current_speed * 1.15 / 1000000 * 9).toFixed(2);
+					if(isNaN(speed)){
+						if(speed > current_speed){
+							current_speed = speed;
+						}
+					if(speed < current_speed){
+						current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+					}
+					times_zero = 0;
+					}
+				}
+				if(current_internet.current_speed.slice(-1) == "k"){
+					current_internet.current_speed = current_internet.current_speed.replace('k','');
+					var speed = (current_internet.current_speed * 1.15 / 1000 * 9).toFixed(2);
+					if(speed > current_speed){
+							current_speed = speed;
+					}
+					if(speed < current_speed){
+						current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+					}
+					times_zero = 0;
+				}
+				if(current_internet.current_speed.slice(-1) == "M"){
+					current_internet.current_speed = current_internet.current_speed.replace('M','');
+					var speed = (current_internet.current_speed * 1.15 * 9).toFixed(2);
+					if(speed > current_speed){
+						current_speed = speed;
+					}
+					if(speed < current_speed){
+						current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+					}
+						times_zero = 0;
+					}
+					if(current_internet.current_speed == "0"){
+						times_zero ++;
+						if(times_zero >= 10){
+							error(3);
+						}
+					}
+				}
+				if(test == 2){
+					if(counter == 0){
+						div = document.getElementById('download');
+						div.innerHTML = div.innerHTML.replace('<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">','');
+						Gauge.Collection.get('gauge1').setValue(0);
+						document.getElementById('action').innerHTML = "Testing upload speed ..";
+						if(current_speed != 0){
+							document.getElementById('download').innerHTML = "<b>" + current_speed +" Mbits/s" +"</b>";
+							document.getElementById("download").style.color = '#404040';
+							current_speed = 0;
+						}
+						else{
+							error(3);
+							return
+						}
+					counter++;
+				}
+				if(isNaN(current_internet.current_speed[0]) || current_internet.current_speed != "" || current_internet.current_speed != " "){
+// 					error(0);
+				}
+				if(!isNaN(current_internet.current_speed.slice(-1)) && current_internet.current_speed!= 0){
+					var speed = (current_internet.current_speed * 1.15 / 1000000 * 8).toFixed(2);
+					if(!isNaN(speed)){
+						if(speed > current_speed){
+							current_speed = speed;
+						}
+						if(speed < current_speed){
+							current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+						}
+						times_zero = 0;
+					}
+				}
+				if(current_internet.current_speed.slice(-1) == "k"){
+					current_internet.current_speed = current_internet.current_speed.replace('k','');
+					var speed = (current_internet.current_speed * 1.15 / 1000 * 8).toFixed(2);
+					if(speed > current_speed){
+						current_speed = speed;
+					}
+					if(speed < current_speed){
+						current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+					}
+					times_zero = 0;
+				}
+				if(current_internet.current_speed.slice(-1) == "M"){
+					current_internet.current_speed = current_internet.current_speed.replace('M','');
+					var speed = (current_internet.current_speed * 1.15 * 8).toFixed(2);
+					if(speed > current_speed){
+						current_speed = speed;
+					}
+					if(speed < current_speed){
+						current_speed =((parseFloat(current_speed) + (parseFloat(current_speed) + parseFloat(speed))/2)/2).toFixed(2);
+					}
+					times_zero = 0;
+				}
+				if(current_internet.current_speed == "0"){
+					times_zero ++;
+					if(times_zero >= 10){
+						error(3);
+					}
+				}
+			}
+		}
+	);
+}
+
+
+function error(code){
+	document.getElementById('status').style.display = "none";
+	document.getElementById("err_message").style.display = 'block';
+	Gauge.Collection.get('gauge1').setValue(0);
+	disable(1);
+	if (code == 0){
+		document.getElementById("err_message").innerHTML = "Can't retrieve servers list!";
+		for( r = 1; r <= 4; r++){
+			document.getElementById('button'+r).style.color = '#B8B8B8';
+			document.getElementById("button"+r).disabled = true;
+			document.getElementById("server"+r).innerHTML = 'Server '+ r;
+			document.getElementById('server'+r).style.color = '#B8B8B8';
+		}
+	}
+	if (code == 1 || code == 2 || code == 3){
+		if(code == 1){
+			document.getElementById("err_message").innerHTML = "Can't connect to any server!";
+		}
+		if(code == 2){
+			document.getElementById("err_message").innerHTML = "Can't connect to server!";
+		}
+		if(code == 3){
+			document.getElementById("err_message").innerHTML = "Lost internet connection!";
+			window.clearInterval(animation);
+			window.clearInterval(speeds);
+			status = "err";
+			XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 9 },
+			function(x, clean){
+			}
+			);
+
+		}
+		disable(1);
+		document.getElementById('connecting').style.color = '#B8B8B8';
+		document.getElementById('ping').style.color = '#B8B8B8';
+		document.getElementById('download').style.color = '#B8B8B8';
+		document.getElementById('upload').style.color = '#B8B8B8';
+		document.getElementById("connecting").innerHTML = '-';
+		document.getElementById("ping").innerHTML = '- ms';
+		document.getElementById("download").innerHTML = '- Mbits/s';
+		document.getElementById("upload").innerHTML = '- Mbits/s';
+		counter = 0;
+		times_zero = 0;
+		speeds = null;
+		animation = null;
+	}
+
+}
+
+
+function restart(){
+	counter = 0;
+	current_speed = 0;
+	times_zero = 0;
+	status = "none";
+	Gauge.Collection.get('gauge1').setValue(0);
+ 	disable(0);
+	document.getElementById('status').style.display = "";
+	document.getElementById('restart').type = "hidden";
+	document.getElementById('connecting').style.color = '#B8B8B8';
+	document.getElementById('ping').style.color = '#B8B8B8';
+	document.getElementById('download').style.color = '#B8B8B8';
+	document.getElementById('upload').style.color = '#B8B8B8';
+	document.getElementById("connecting").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">';
+	document.getElementById("ping").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + ' ms';
+	document.getElementById("download").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">'+' Mbits/s';
+	document.getElementById("upload").innerHTML = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">' + ' Mbits/s';
+	div = document.getElementById('connecting');
+	if(last_server_name.length > 30){
+		last_server_name = last_server_name.substring(0,30) + "...";
+	}
+		div.innerHTML = "<b>" + last_server_name + "</b>";
+		document.getElementById("connecting").style.color = '#404040';
+		document.getElementById('action').innerHTML = "Connecting to server ..";
+		XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 5, server_to_connect: last_connection },
+		function(v, test_ping){
+				try{
+					if (test_ping.internet == "1"){
+							div = document.getElementById('ping');
+							div.innerHTML = "<b>" + test_ping.ping_to_server + " ms" + "</b>";
+								document.getElementById("ping").style.color = '#404040';}
+					else {error(2);}
+					}
+			catch(err){
+					location.href=location.href;
+					return}
+
+		times_zero = 0;
+		animation = setInterval(function () {meter_animation()}, 200);
+		speeds = setInterval(function () {current_test_speed(1)}, 2000);
+		document.getElementById('action').innerHTML = "Testing download speed ..";
+		XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 6, server_to_connect: last_connection },
+		function(v, test_download){
+			window.clearInterval(speeds);
+			window.clearInterval(animation);
+			times_zero = 0;
+			if(status != "err"){
+			speeds = setInterval(function () {current_test_speed(2)}, 2000);
+			animation = setInterval(function () {meter_animation()}, 200);
+			XHR.get('<%=luci.dispatcher.build_url("admin", "status", "speedtest" )%>', { step: 7, server_to_connect: last_connection },
+			function(v, test_upload){
+						window.clearInterval(animation);
+						window.clearInterval(speeds);
+						disable(1);
+						div = document.getElementById('upload');
+						div.innerHTML = div.innerHTML.replace('<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading">', '');
+						if(current_speed != 0){
+							document.getElementById('upload').innerHTML = "<b>" + current_speed + "Mbits/s" +"</b>";
+							document.getElementById("upload").style.color = '#404040';
+						}
+						else{
+							error(3);
+							return
+						}
+								document.getElementById('status').style.display = "none";
+								Gauge.Collection.get('gauge1').setValue(0);
+								document.getElementById('restart').type = "button";
+			}
+			);
+			}
+		}
+		);
+	}
+	);
+}
+
+
+function meter_animation(){
+		action = Math.floor((Math.random() * 2) + 1);
+		percent = Math.floor((Math.random() * 4) + 1);
+
+		if(action == 1 && percent == 1){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.21);
+		}
+		if(action == 2 && percent == 1){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.19);
+		}
+		if(action == 1 && percent == 2){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.22);
+		}
+		if(action == 2 && percent == 2){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.18);
+		}
+		if(action == 1 && percent == 3){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.23);
+		}
+		if(action == 1 && percent == 4){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.24);
+		}
+		if(action == 2 && percent == 3){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.17);
+		}
+		if(action == 2 && percent == 4){
+			Gauge.Collection.get('gauge1').setValue(current_speed * 2.16);
+		}
+
+}
+
+</script>
+<h2><a id="content" name="content"><%=translate("Speed Test")%></a></h2>
+<div id="err_message" class="alert-message error" style="display: none"></div>
+<div id="page" >
+	<div id="loading" style="display: inline-block"></div>
+	<div style="float: right">
+	<br>
+	<br>
+	<br>
+</div>
+
+	<canvas id="gauge1" width="200" height="200" style="margin-left: auto;margin-right: auto;display: block;"
+		data-type="canv-gauge"
+		data-title="Speed"
+		data-min-value="0"
+		data-max-value="220"
+		data-major-ticks="0 20 40 60 80 100"
+		data-minor-ticks="4"
+		data-stroke-ticks="true"
+		data-units="Mbits/s"
+		data-value-format="3.2"
+		data-glow="true"
+		data-animation-delay="10"
+		data-animation-duration="200"
+		data-animation-fn="bounce"
+		data-colors-needle="#373536 #373536"
+		data-highlights="0 30 #eee, 30 60 #ccc, 60 90 #aaa, 90 220 #eaa"
+                data-onready="Gauge.Collection.get('gauge1').setValue(0);"
+	></canvas>
+		<div style="height:60px">
+			<div id="status" style="display: none;">
+			<div id="spinner" style="display:block;width:30px;margin-left:auto;margin-right:auto"> <img src="/luci-static/resources/icons/loading.gif" style="width: 30px; height: 30px" alt="Loading"></div>
+			<div id="action" align="center" style="display:block;margin-left:auto;margin-right:auto; width: 35%"></div>
+		</div>
+	</div>
+	<br>
+	<br>
+	<br>
+	<input type="button" value="<%=translate('Begin auto test')%>" class="cbi-button"  style="float: left; margin-right: ; margin-top: -50px; display: block" id="start" onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Test with best server based on ping')" <="" span="" onclick="HideHint(this);auto_test()">
+	<input type="button" value="<%=translate('Get servers list')%>" class="cbi-button" id="get_servers" style="float: right; margin-right: ; margin-top: -50px" onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Recieve nearest servers around your location')" <="" span="" onclick="HideHint(this);getservers()">
+
+        <table id="results" width="10%" cellspacing="1" class="cbi-section-table" style="float:left;width: 47%">
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Testing from')" <="" span="" style="color: rgb(64, 64, 64);"><%=translate("Server")%></span></td>  <td style="vertical-align: middle; color: #B8B8B8" id="connecting" width="65%">-</td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Reaction time of your connection')" <="" span="" style="color: rgb(64, 64, 64);"><%=translate("Ping")%></span></td>                       <td style="vertical-align: middle; color: #B8B8B8" id="ping" width="65%"> -  ms</td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Your current download speed')" <="" span="" style="color: rgb(64, 64, 64);"><%=translate("Download speed")%></span></td>                       <td style="vertical-align: middle; color: #B8B8B8" id="download" width="65%">-  Mbits/s</td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px; border-bottom: 1px solid #DDD"><td style="vertical-align: middle"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, 'Your current upload speed')" <="" span="" style="color: rgb(64, 64, 64);"><%=translate("Upload speed")%></span></td>  <td style="vertical-align: middle; color: #B8B8B8" id="upload" width="65%">-  Mbits/s</td>
+        </table>
+	<table id="servers" width="10%" cellspacing="1" class="cbi-section-table" style="float:left;width: 47%; margin-left: 6%">
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle; color: #B8B8B8" id="server1">Server 1</td>  <td width="25%"><input type="button" value="Begin test" class="cbi-button" style="margin-bottom: 0px; margin-right: 10px; color: #B8B8B8" id="button1" onclick="speedtest(0)" disabled></td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle; color: #B8B8B8" id="server2" width="75%">Server 2</td>    <td width="25%"><input type="button" value="Begin test" class="cbi-button" style="margin-bottom: 0px; margin-right: 10px;color: #B8B8B8" id="button2" onclick="speedtest(1)" disabled></td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px"><td style="vertical-align: middle; color: #B8B8B8" id="server3"  width="75%">Server 3</td>   <td width="25%; style="vertical-align: middle"><input type="button" value="Begin test" class="cbi-button" style="margin-bottom: 0px; margin-right: 10px ; color: #B8B8B8" id="button3" onclick="speedtest(2)" disabled></td>
+                <tr class="cbi-section-table-row" style="width: 50%; height: 44px; border-bottom: 1px solid #DDD; color: #B8B8B8"><td style="vertical-align: middle" id="server4" width="75%">Server 4</td>    <td width="25%"><input type="button" value="Begin test" class="cbi-button" style="margin-bottom: 0px; vertical-align: middle; margin-right: 10px ; color: #B8B8B8" id="button4" onclick="speedtest(3)" disabled></td>
+        </table>
+
+</div>
+<div>
+
+<input type="hidden" value="<%=translate('Test again')%>" class="cbi-button" id="restart" style="float: left; display: block" onclick="restart()">
+
+</div>
+<%+footer%>
+
+

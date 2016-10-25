@@ -1,0 +1,8 @@
+
+config 'mdcollectd' 'config'
+	option enabled '0'
+	option traffic '0'
+	option datalimit '0'
+	option sim_switch '0'
+	option interval '60'
+

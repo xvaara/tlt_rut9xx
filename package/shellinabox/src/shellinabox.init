@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2015 Teltonika
+#. /lib/teltonika-functions.sh
+#. /lib/functions.sh
+
+#START=97
+USE_PROCD=1
+enable=`uci get cli.status.enable`
+port=`uci get cli.status.port`
+
+start_service()
+{
+	if [ "$enable" == "1" ]; then
+		if [ `ps | grep -v grep | grep shellinaboxd -c` != "2" ]; then
+			/usr/sbin/shellinaboxd "--port=$port" &
+		fi
+	fi
+}
+
+stop_service()
+{
+	killall shellinaboxd
+}
+
+restart_service()
+{
+	killall shellinaboxd
+	if [ "$enable" == "1" ]; then
+		/usr/sbin/shellinaboxd "--port=$port" &
+	fi
+}
+
+reload_service(){
+	killall shellinaboxd
+	if [ "$enable" == "1" ]; then
+		/usr/sbin/shellinaboxd "--port=$port" &
+	fi
+}

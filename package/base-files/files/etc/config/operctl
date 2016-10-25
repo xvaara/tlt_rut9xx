@@ -1,0 +1,3 @@
+config operctl 'general'
+	option debug_lvl '4'
+

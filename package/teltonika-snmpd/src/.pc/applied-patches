@@ -1,0 +1,9 @@
+100-debian-statistics.patch
+110-debian-makefiles.patch
+120-debian-searchdirs.patch
+130-debian-extramibs.patch
+140-debian-docfiles.patch
+150-debian-defaultconfig.patch
+160-no_ldconfig.patch
+170-ldflags.patch
+750-ieee802dot11.patch

@@ -1,0 +1,13 @@
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -1548,7 +1425,9 @@
+ 		// can rename the link if it knows better.
+ 		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
+ 		    ((dev->driver_info->flags & FLAG_POINTTOPOINT) == 0 ||
+-		     (net->dev_addr [0] & 0x02) == 0))
++		     (net->dev_addr [0] & 0x02) == 0) ||
++		     //special case for Huawei ME909 modems
++		     ((net->dev_addr [1] == 0x1E) && (net->dev_addr [2] == 0x10)))
+ 			strcpy (net->name, "eth%d");
+ 		/* WLAN devices should always be named "wlan%d" */
+ 		if ((dev->driver_info->flags & FLAG_WLAN) != 0)

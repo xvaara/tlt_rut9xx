@@ -1,0 +1,1815 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008-2011 Jo-Philipp Wich <xm@subsignal.org>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: index.htm 8408 2012-04-02 22:50:26Z jow $
+
+-%>
+
+<%
+local sys = require "luci.sys"
+require "teltonika_lua_functions"
+require "luci.fs"
+require "luci.tools.status"
+eventlog = require'tlt_eventslog_lua'
+local uci = require("uci").cursor()
+local nw  = require "luci.model.network"
+local bus = require "ubus"
+local _ubus = bus.connect()
+local bridge_mode = uci:get("network", "ppp", "method")
+local ppp_enabled = uci:get("network", "ppp", "enabled")
+local bridge_on = false
+local ds = require "luci.dispatcher"
+luci.util   = require "luci.util"
+local translatef = luci.i18n.translatef
+local ntm = require "luci.model.network".init()
+local a = 0
+local stat=sys.exec("uci show overview.show")
+local open_vpn_names = {}
+local show_hotspots = {}
+
+if bridge_mode and ppp_enabled and ppp_enabled == "1" and bridge_mode == "bridge" then
+	bridge_on = true
+end
+
+function string:split( inSplitPattern, outResults )
+	if not outResults then
+		outResults = { }
+	end
+	local theStart = 1
+	local theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+	while theSplitStart do
+		table.insert( outResults, string.sub( self, theStart, theSplitStart-1 ) )
+		theStart = theSplitEnd + 1
+		theSplitStart, theSplitEnd = string.find( self, inSplitPattern, theStart )
+	end
+	table.insert( outResults, string.sub( self, theStart ) )
+	return outResults
+end
+
+
+function getParam(string)
+	local h = io.popen(string)
+	local t = h:read()
+	h:close()
+	return t
+end
+
+	wimax_table="0"
+	for line in stat:gmatch("[^\r\n]+") do
+		if a ~= 0 then
+			if line:find("show.system=") then
+				system_table = string.gsub(line,".*=","")
+			elseif line:find("show.mobile=") then
+				if luci.tools.status.show_mobile() then
+					mobile_table = string.gsub(line,".*=","")
+				else
+					mobile_table = "0"
+				end
+			elseif line:find("show.wireless=") then
+				wireless_table = string.gsub(line,".*=","")
+			elseif line:find("show.wan=") then
+				wan_table = string.gsub(line,".*=","")
+			elseif line:find("show.local_network=") then
+				local_network_table = string.gsub(line,".*=","")
+			elseif line:find("show.access_control=") then
+				access_control_table = string.gsub(line,".*=","")
+			elseif line:find("show.network_events=") then
+				network_events_table = string.gsub(line,".*=","")
+			elseif line:find("show.system_events=") then
+				system_events_table = string.gsub(line,".*=","")
+			elseif line:find("show.sms_counter=") then
+				sms_counter_table = string.gsub(line,".*=","")
+			elseif line:find("show.open_vpn") then
+				if string.gsub(line,"overview.show.open_vpn.*=","") == "1" then
+					open_vpn_names[#open_vpn_names + 1] = string.gsub(string.gsub(line,"overview.show.open_vpn_",""),"=.*","")
+					if open_vpn_table == nil then
+						open_vpn_table = "1"
+					end
+				end
+			elseif line:find("show.hotspot") then
+				if string.gsub(line,"overview.show.hotspot.*=","") == "1" then
+					show_hotspots[#show_hotspots+1] = string.gsub(string.gsub(line,"overview.show.",""),"=.*","")
+					if hotspot_table == nil then
+						hotspot_table = "1"
+					end
+				end
+			elseif line:find("show.vrrp") then
+				vrrp_table = string.gsub(line,".*=","")
+			elseif line:find("show.monitoring") then
+				monitoring_table = string.gsub(line,".*=","")
+			elseif line:find("show.wimax") then
+				wimax_table = string.gsub(line,".*=","")
+			end
+		end
+		a = a + 1
+	end
+	if open_vpn_table == nil then
+		open_vpn_table = "0"
+	end
+	if hotspot_table == nil then
+		hotspot_table = "0"
+	end
+	
+	uci:foreach("network", "interface",
+		function (section)
+			local ifname = uci:get(
+				"network", section[".name"], "ifname"
+			)
+			local metric = uci:get(
+				"network", section[".name"], "metric"
+			)
+			local info1
+			local string1
+			if "usb0" == ifname then
+				string1 = "network.interface." .. tostring(section[".name"])
+				info1 = _ubus:call(string1, "status", { })
+				
+				if info1 and info1['ipv4-address'] then
+					local a
+					for _, a in ipairs(info1['ipv4-address']) do
+						if a.address and wimax_table == "1" then
+							wimax_table = "1"
+							wimax_port = uci:get("firewall", "E_WIMAX_WEBUI", "src_dport")
+							ip_address = uci:get("network", "lan", "ipaddr")
+						else
+							wimax_table = "0"
+						end
+					end
+				else
+					wimax_table = "0"
+				end
+			end
+		end
+	)
+	
+	function look_for_hotspot(hot_id)
+		show_hotspot = false
+		for f = 1, #show_hotspots do
+			if hot_id == show_hotspots[f] then
+				show_hotspot = true
+				break
+			end
+		end
+		return show_hotspot
+	end
+
+	--parse hotspot ssid
+	if hotspot_table == "1" then
+		hotspots_id = {}
+		hotspots_ssid = {}
+		local info = _ubus:call("network.wireless", "status", { })
+		local interfaces = info.radio0.interfaces
+		for i, net in ipairs(interfaces) do
+			hotspots_id[#hotspots_id +1] = uci:get("wireless", net.section, "hotspotid") or getParam("uci -q get wireless." .. net.section .. ".hotspotid")
+			if look_for_hotspot(hotspots_id[i]) then
+				hotspots_ssid[#hotspots_ssid +1] = net.config.ssid
+			end
+		end
+	end
+
+	--local moduleIface = luci.util.trim(luci.sys.exec("uci get system.module.iface"))
+	--local moduleDev = luci.util.trim(luci.sys.exec("uci get network.ppp.device"))
+	--local ModuleName = luci.util.trim(luci.sys.exec("uci get system.module.name"))
+	--local modelservice = "3G"
+	--local moduleVidPid = luci.util.trim(luci.sys.exec("uci get system.module.vid"))..":"..luci.util.trim(luci.sys.exec("uci get system.module.pid"))
+
+	if luci.http.formvalue("status") == "1" then
+		function eventspit(event)
+			event = tostring(event)
+			local myTable = event:split("\n")
+				for i=1, #myTable -1 do
+					line = myTable[i]:split("|")
+					Table[i] = {}
+					for j=1, #line do
+						Table[i][j] = line[j]
+					end
+				end
+			return Table
+		end
+
+		local rv = {
+			localtime = os.date("%F, %T")
+		}
+			--------system-----------
+			if system_table ~= "0" then
+				local _, _, memtotal, memcached, membuffers, memfree = luci.sys.sysinfo()
+				local flashfree = luci.util.trim(luci.sys.exec("df -k | grep -w rootfs | tail -1 | awk '{print $4}'")) or "1024"
+				local flashspace = luci.util.trim(luci.sys.exec("df -k | grep -w rootfs | tail -1 | awk '{print $2}'")) or "1280"
+				local flashtotal = luci.util.trim(luci.sys.exec("/sbin/get_size_flash.sh")) or "16"
+				local cpuload = luci.util.trim(luci.sys.exec("/sbin/cpu_usage_script.sh"))
+				cpuload = tonumber(cpuload)
+				if cpuload >= 100 then
+					cpuload = 100
+				end
+				local fwver = luci.util.trim(luci.sys.exec("cat /etc/version"))
+
+				rv.uptime = luci.sys.uptime()
+				rv.loadavg = { luci.sys.loadavg() }
+				rv.cpuload = cpuload
+				rv.memtotal = memtotal
+				rv.memfree = memfree
+				rv.flashtotal = flashtotal
+				rv.flashfree = flashfree
+				rv.flashspace = flashspace
+				rv.fwver = fwver
+			end
+
+			--------mobile-----------
+			if mobile_table ~= "0" then
+				local dr4 = luci.sys.net.defaultroute()
+				local dr6 = luci.sys.net.defaultroute6()
+				local moduleType = luci.util.trim(luci.sys.exec("uci get system.module.type"))
+				local data = nw:new_get_info()
+
+				if (data ~= nil) then
+					netstate = data["netstate"]
+					gstate  = data["state"]
+					gsigstr = data["signal"]
+					goper   = data["oper"]
+					gctype  = data["ntype"]
+					sim_use = getParam("/sbin/gpio.sh get SIM")
+
+					if gctype ~= nil then
+						if gctype:match("^CDMA") or gctype:match("^EDGE") or gctype:match("^GPRS")
+						then
+							gctype = "2G " .. "(" .. gctype .. ")"
+						elseif gctype:match("^WCDMA") or gctype:match("^HSDPA") or gctype:match("^HSUPA") or gctype:match("^HSPA") or gctype:match("^HSPA+")
+						then
+							gctype = "3G " .. "(" .. gctype .. ")"
+						elseif gctype:match("^LTE")
+						then
+							gctype = "4G " .. "(" .. gctype .. ")"
+						end
+					end
+
+					grecv = data["rxbytes"]
+					gsent = data["txbytes"]
+
+					gsim = data["simstate"]
+					gpin = data["pinstate"]
+					gpinr = data["pinleft"]
+
+					if gsim ~= nil then
+						if gsim:match("not inserted") and gpin ~= nil then
+							gsim = tostring(luci.i18n.translate("not inserted"))
+						elseif gsim:match("inserted") and gpin ~= nil then
+							if gpin:match("READY") then
+								gsim = tostring(luci.i18n.translate("Ready"))
+							elseif gpin:match("PIN REQUIRED") then
+								if gpinr == "N/A" then
+									gsim = translate("PIN required")
+								elseif tonumber(gpinr) == 1 then
+									gsim = tostring(luci.i18n.translatef("PIN required. %d attempt left.", tonumber(gpinr)))
+								elseif tonumber(gpinr) >= 1 and tonumber(gpinr) <= 3 then
+									gsim = tostring(luci.i18n.translatef("PIN required. %d attempts left.", tonumber(gpinr)))
+								else
+									gsim = tostring(luci.i18n.translate("PIN required"))
+								end
+							elseif gpin:match("PUK REQUIRED") then
+								if gpinr == "N/A" then
+									gsim = translate("PIN required")
+								elseif tonumber(gpinr) == 1 then
+									gsim = tostring(luci.i18n.translatef("PUK required. %d attempt left.", tonumber(gpinr)))
+								elseif tonumber(gpinr) >= 1 and tonumber(gpinr) <= 10 then
+									gsim = tostring(luci.i18n.translatef("PUK required. %d attempts left.", tonumber(gpinr)))
+								else
+									gsim = tostring(luci.i18n.translate("PUK required"))
+								end
+							else
+								gsim = tostring(luci.i18n.translate("SIM error"))
+							end
+						else
+							gsim = tostring(luci.i18n.translate("not inserted"))
+						end
+					end
+				end
+
+				if  not bridge_on and gsim == 'Ready' then
+					local mobile_section = get_wan_section("type", "mobile")
+					local mobile_enabled = uci:get("network", mobile_section, "enabled") or "1"
+					if mobile_enabled == "1" and gstate == "connected" then
+						local wan
+						if mobile_section == "wan" then
+							if dr4 and dr4.device then
+								wan = ntm:get_interface(dr4.device)
+								wan = wan and wan:get_network()
+								mobileuptime = wan:uptime()
+							else
+								mobileuptime = 0
+							end
+						else
+							wan = nw:get_network(mobile_section)
+							mobileuptime = wan:uptime()
+						end
+					else
+						mobileuptime = 0
+					end
+				else
+					mobileuptime = 0
+				end
+
+				rv.gsigstr = gsigstr
+				rv.gstate = gstate
+				rv.netstate = netstate
+				rv.gctype = gctype
+				rv.sim_use = sim_use
+				rv.gsim = gsim
+				rv.grecv = grecv
+				rv.gsent = gsent
+				rv.goper = goper
+				rv.mobileuptime = mobileuptime
+			end
+
+			-------wireless-------
+			if wireless_table ~= "0" then
+				rv.wifinets = luci.tools.status.wifi_networks()
+				rv.iwinfo = ntm:iwinfo_parser()
+			end
+
+			-------wan-----------
+			if wan_table ~= "0" then
+				local has_backupLink = luci.fs.access("/tmp/.mwan/cache")
+				
+				if has_backupLink then
+					wan = nw:get_network(get_active_connection())
+				else
+					local dr4 = luci.sys.net.defaultroute()
+					
+					if dr4 then
+						wan = ntm:get_interface(dr4.device)
+						wan = wan and wan:get_network()
+					end
+				end
+				
+				if wan then
+					rv.ifname = (wan and wan:ifname()) or "N/A"
+					if rv.ifname == "usb0" then
+						rv.ipaddr = nw:wimaxCGICall({ call ="extip" }) or "N/A"
+					else
+						rv.ipaddr = (wan and wan:ipaddr()) or "N/A"
+					end
+				end
+				rv.backupwan = luci.util.trim(luci.sys.exec("uci get multiwan.config.enabled"))
+				rv.moduleType = luci.util.trim(luci.sys.exec("uci get system.module.type"))
+			end
+
+			------LAN--------------
+			if local_network_table ~= "0" then
+				lan = ntm:get_interface("br-lan")
+				lan = lan and lan:get_network()
+
+				if bridge_on then
+					lan["sid"] = "lan2"
+				end
+				rv.lan_ipaddr  = lan:ipaddr()
+				rv.lan_netmask = lan:netmask()
+				rv.dhcp_leases = luci.tools.status.dhcp_leases()
+			end
+
+			------Access controll-------
+			if access_control_table ~= "0" then
+				uci:foreach("dropbear", "dropbear", function(s)
+					ssh = s.enable or 0
+				end)
+				uci:foreach("firewall", "rule", function(s)
+					if s.name == "Enable_HTTP_WAN" then
+						wan_http = s.enabled or 1
+					end
+					if s.name == "Enable_HTTPS_WAN" then
+						wan_https = s.enabled or 1
+					end
+					if s.name == "Enable_SSH_WAN" then
+						wan_ssh = s.enabled or 1
+					end
+				end)
+				rv.ssh = ssh
+				rv.http = uci:get("uhttpd", "main", "enablehttp") or 0
+				rv.https = 1
+				rv.wan_http = wan_http
+				rv.wan_https = wan_https
+				rv.wan_ssh = wan_ssh
+			end
+
+			------Events-------
+			if network_events_table ~= "0" then
+				local eventTable = {}
+				local eventTable = {}
+				local t
+				t = {requests = "print", table = "connections", date = "1", order="ID DESC", limit="5"}
+				rv.networkTable = eventlog:print(t)
+			end
+
+			if system_events_table ~= "0" then
+				local eventTable = {}
+				local t
+				t = {requests = "print", table = "events", date = "1", order="ID DESC", limit="5"}
+				rv.eventTable = eventlog:print(t)
+			end
+
+			------Sms counter-------
+			if sms_counter_table ~= "0" then
+				local values_sms = sys.exec("/sbin/sms_counter.lua value both")
+				local line_counter = 1
+				send_sms = {}
+				recieved_sms = {}
+				if values_sms then
+					for line in values_sms:gmatch("[^\r\n]+") do
+						send_sms[line_counter] = string.gsub(line," .*","")
+						recieved_sms[line_counter] = string.gsub(line,".* ","")
+						line_counter = line_counter + 1
+					end
+				end
+				if send_sms[1] == nill and recieved_sms[1] == nil then
+					send_sms[1] = "0"
+					send_sms[2] = "0"
+					recieved_sms[1] = "0"
+					recieved_sms[2] = "0"
+				end
+				rv.send_sms = send_sms
+				rv.recieved_sms = recieved_sms
+			end
+			------Open VPN-------
+			if open_vpn_table ~= "0" then
+				rv.open_vpn = nw:get_openvpn()
+				rv.open_vpn_names = open_vpn_names
+			end
+
+			------Hotspot-------
+			if hotspot_table ~= "0" then
+				local hotspot_users = {}
+				local hotspots_status = {}
+				local hotspot_received  = {}
+				local hotspot_sent = {}
+
+				local info = _ubus:call("network.wireless", "status", { })
+				local interfaces = info.radio0.interfaces
+				for i, net in ipairs(interfaces) do
+					if look_for_hotspot(hotspots_id[i]) then
+						hotspots_status[#hotspots_status+1] = uci:get("coovachilli", hotspots_id[i], "enabled") or getParam("uci -q get coovachilli." .. hotspots_id[i] .. ".enabled")
+						hotspot_info = luci.sys.exec("chilli_query -s /var/run/chilli."..net.ifname..".sock list")
+						users_count = 0
+						bytes_sent_hotspot = 0
+						bytes_received_hotspot = 0
+						for line in hotspot_info:gmatch("[^\r\n]+") do
+							line = line:split(" ")
+							if line[5] == "1" then
+								users_count = users_count + 1
+								bytes_received_hotspot = bytes_received_hotspot + string.gsub(line[9],"/.*","")
+								bytes_sent_hotspot = bytes_sent_hotspot + string.gsub(line[10],"/.*","")
+							end
+						end
+
+						hotspot_users[#hotspot_users+1] = users_count
+						hotspot_received[#hotspot_received+1] = bytes_received_hotspot
+						hotspot_sent[#hotspot_sent+1] = bytes_sent_hotspot
+					end
+				end
+				rv.hotspot_received = hotspot_received
+				rv.hotspot_sent = hotspot_sent
+				rv.hotspots_status = hotspots_status
+				rv.hotspot_users = hotspot_users
+			end
+
+			------Vrrp-------
+			if vrrp_table ~= 0 then
+				local vrrp_router_status = luci.sys.exec("cat /tmp/vrrpd_lan_log")
+				local f = vrrp_router_status:split("\n")
+				vrrp_router_status = f[1]
+				local vrrp_status
+				local vrrp_priority
+				local vrrp_ip = {}
+				local vrrp_config = luci.sys.exec("uci show vrrpd.vid1")
+				for line in vrrp_config:gmatch("[^\r\n]+") do
+					if line:find("vrrpd.vid1.enabled=") then
+						vrrp_status = string.gsub(line,"vrrpd.vid1.enabled=","")
+					elseif line:find("vrrpd.vid1.priority=") then
+						vrrp_priority = string.gsub(line,"vrrpd.vid1.priority=","")
+					elseif line:find("vrrpd.vid1.virtual_ip=") then
+						local cc = string.gsub(line,"vrrpd.vid1.virtual_ip=","")
+						vrrp_ip = cc:split(" ")
+					end
+				end
+				rv.vrrp_status = vrrp_status
+				rv.vrrp_priority = vrrp_priority
+				rv.vrrp_ip = vrrp_ip
+				rv.vrrp_router_status = vrrp_router_status
+			end
+
+	function get_monitoring_error(err_tag, log_file)
+		err_found = false
+		local m_router_status
+		if log_file == "1" then
+			m_router_status = luci.sys.exec("cat /tmp/mon_openvpn_log | grep -v grep | grep \"" .. err_tag .. "\"")
+		else
+			m_router_status = luci.sys.exec("cat /tmp/mon_openvpn_log2 | grep -v grep | grep \"" .. err_tag .. "\"")
+		end
+		local f = m_router_status:split("\n")
+		if f[1] ~= "" then
+			err_found = true
+		end
+		return err_found
+	end
+			------Monitoring------
+			if monitoring_table ~= 0 then
+				local monitoring_router_status = ""
+				local monitoring_status
+				local monitoring_default_config = luci.sys.exec("uci -c /rom/etc/config show openvpn.teltonika_auth_service")
+				local monitoring_config = luci.sys.exec("uci show openvpn.teltonika_auth_service")
+				local tik
+				for line in monitoring_config:gmatch("[^\r\n]+") do
+					if line:find("openvpn.teltonika_auth_service.enable=") then
+						monitoring_status = string.gsub(line,"openvpn.teltonika_auth_service.enable=","")
+					elseif line:find("openvpn.teltonika_auth_service.port=") then
+						monitoring_port = string.gsub(line,"openvpn.teltonika_auth_service.port=","")
+					elseif line:find("openvpn.teltonika_auth_service.remote=") then
+					        monitoring_remote = string.gsub(line,"openvpn.teltonika_auth_service.remote=","")
+					elseif line:find("openvpn.teltonika_auth_service.dev=") then
+						monitoring_dev = string.gsub(line,"openvpn.teltonika_auth_service.dev=","")
+					end
+				end
+				for line in monitoring_default_config:gmatch("[^\r\n]+") do
+					if line:find("openvpn.teltonika_auth_service.port=") then
+						monitoring_default_port = string.gsub(line,"openvpn.teltonika_auth_service.port=","")
+					elseif line:find("openvpn.teltonika_auth_service.remote=") then
+						monitoring_default_remote = string.gsub(line,"openvpn.teltonika_auth_service.remote=","")
+					end
+				end
+				if monitoring_status == "1" then
+					if get_monitoring_error("Network is unreachable", "1") then
+						monitoring_router_status = "Server is unreachable"
+					else
+						monitoring_dev = monitoring_dev.."[0-9]\{1,\}"
+						if monitoring_remote == monitoring_default_remote and monitoring_port == monitoring_default_port then
+							luci.sys.exec("rm /tmp/mon_openvpn_log2")
+							monitoring_router_status = "Connecting to server"
+							tik = true
+							if get_monitoring_error("AUTH_FAILED", "1") then
+								monitoring_router_status = "Device is not registered in monitoring system"
+								tik = false
+							end
+							if get_monitoring_error("device " .. monitoring_dev .. " opened", "1") then
+								monitoring_router_status = "Primary connection to server made"
+								tik = false
+							end
+							if tik then
+								local ptp_ip = luci.sys.exec("cat /tmp/mon_openvpn_log | grep -o '" .. monitoring_dev .. "[0-9]\{1,\} [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\} pointopoint [0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' | awk '{print $4}'")
+								local ptp_err = luci.sys.exec("eventslog -p -t EVENTS | grep '".. ptp_ip .."' | tail -1")
+								if ptp_err ~= "" and ptp_err:find("Bad password") then
+									monitoring_router_status = "Wrong device password in monitoring system"
+								end
+							end
+						else
+							if monitoring_remote == monitoring_default_remote then
+								monitoring_router_status = "Connecting to profile tunnel"
+								local m_router_status = luci.sys.exec("cat /tmp/monitoring_log")
+								local f = m_router_status:split("\n")
+								if f[1] ~= "" then
+										monitoring_router_status = f[1]
+								end
+								if get_monitoring_error("device " .. monitoring_dev .. " opened", "1") then
+									monitoring_router_status = "Connected to profile tunnel"
+									local m_router_status = luci.sys.exec("cat /tmp/monitoring_log")
+									local f = m_router_status:split("\n")
+									if f[1] ~= "" then
+										monitoring_router_status = f[1]
+									end
+								end
+								if get_monitoring_error("Closing TUN/TAP interface", "2") then
+									monitoring_router_status = "Connection closed"
+									luci.sys.exec("rm /tmp/monitoring_log")
+								end
+							end
+						end
+					end
+				end
+
+				rv.monitoring_status = monitoring_status
+				rv.monitoring_router_status = monitoring_router_status
+			end
+			-------wimax-----------
+			if wimax_table ~= "0" then
+				wtime   = nw:wimaxCGICall({ call ="time" }) 
+				if wtime ~= nil and wtime ~= "" and wtime ~= "401" then
+					wstate  = nw:wimaxCGICall({ call = "state" })
+					wsigstr = nw:wimaxCGICall({ call ="signal-strength" })
+					wsigqual= nw:wimaxCGICall({ call ="signal-quality-dbm" })
+					wmac    = nw:wimaxCGICall({ call ="macaddress" })
+					
+					rv.wtime	= wtime
+					rv.wstate	= wstate
+					rv.wsigstr	= wsigstr
+					rv.wsigqual	= wsigqual
+					rv.wmac		= wmac
+				elseif wtime == "401" then
+					rv.wtime	= "401"
+					rv.wstate	= "401"
+					rv.wsigstr	= "N/A"
+					rv.wsigqual	= "401"
+					rv.wmac		= "401"
+				else
+					rv.wtime	= "-"
+					rv.wstate	= "-"
+					rv.wsigstr	= "N/A"
+					rv.wsigqual	= "-"
+					rv.wmac		= "-"
+				end
+			end
+		luci.http.prepare_content("application/json")
+		luci.http.write_json(rv)
+
+		return
+	end
+
+	local system, model = luci.sys.sysinfo()
+-%>
+
+<%+header%>
+
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">//<![CDATA[
+
+	var e;
+	function progressbar(v, m)
+	{
+		var vn = parseInt(v) || 0;
+		var mn = parseInt(m) || 100;
+		var pc = Math.floor((100 / mn) * vn);
+		var ram_string = '<%=translate("RAM")%>';
+		return String.format(
+			'<div style="width:130px; position:relative; top:14px; border: 0px solid black; background-color:#e4e4e4;">' +
+				'<div style="background-color:#4078d8; width:%d%%; height:4px">' +
+					'<div> <span onmouseover="ShowHint(this, \'<%=translate("Total RAM memory size: %s , available: %s / %s ")%>\')" onmouseout="HideHint(this)" >' +
+						'<div style="position:absolute; left:0; bottom:5px; font-size:14px; width:100%%; color:#404040;">' +
+							'<small>%s (%d%%) %s</small>' +
+						'</div>' +
+					'</span></div>' +
+				'</div>' +
+			'</div>', pc, m, v, m, v, pc, ram_string
+		);
+	}
+	function progressbar_flash(v, m, total)
+	{
+		var vn = parseFloat(v) || 1.0;
+		var mn = parseFloat(m) || 1.3;
+		var pc = Math.floor((100 / mn) * vn);
+		var flash_string = '<%=translate("FLASH")%>';
+		return String.format(
+			'<div style="width:130px; position:relative; top:14px; border: 0px solid black; background-color:#e4e4e4;">' +
+				'<div style="background-color:#4078d8; width:%d%%; height:4px">' +
+					'<div> <span onmouseover="ShowHint(this, \'<%=translate("Total FLASH memory size: %s , available: %s MB/ %s MB")%>\')" onmouseout="HideHint(this)" >' +
+						'<div style="position:absolute; left:0; bottom:5px; font-size:14px; width:100%%; color:#404040;">' +
+							'<small>%s (%d%%) %s</small>' +
+						'</div>' +
+					'</span></div>' +
+				'</div>' +
+			'</div>', pc, total, vn, mn, v, pc, flash_string
+		);
+	}
+	function baravg(v)
+	{
+		var vn = v;
+		var mn = 100;
+		var pc = Math.floor((100 / mn) * vn);
+
+		return String.format(
+			'<div style="width:100px; position:relative; top:12px; right:110px; border: 1px solid black; background-color:#e4e4e4;">' +
+				'<div style="background-color:#4078d8; width:%d%%; height:8px"></div>' +
+			'</div><small>%s% CPU load</small>', pc, v
+		);
+	}
+	function displaywifi(num)
+	{
+		if (num == 1){
+			return String.format(
+				'<small style="position: relative; bottom: 3px; right: 5px;">ON</small><img id="wifibar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wifi.png" />'
+			);
+		}else{
+			return String.format(
+				'<small style="position: relative; bottom: 3px; right: 5px;">OFF</small><img id="wifibar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wifi_disabled.png" />'
+			);
+		}
+	}
+	function displaywifiprotection(num, ssid)
+	{
+		if (num == 1){
+			return String.format(
+				'<img id="wifibar" style="margin-right: 5px;; height: 10px;" src="<%=resource%>/icons/locked.png"  >'
+			);
+		}else{
+			return String.format(
+				'<img id="wifibar" style="margin-right: 5px;; height: 10px;" src="<%=resource%>/icons/openlock.png">'
+			);
+		}
+	}
+	function displaywan(name, module, ip)
+	{
+// 	alert("name, module, ip\n" + name + ", " + module + ", " + ip);
+		if (ip.length > 3){
+			if ((name == 'wm0') || (name == 'eth1(wimax)' && module == 'wimax') || (name == 'usb0' )){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">WiMAX</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wimax.png" />'
+				);
+
+			}else if ((name == '3g-ppp') || (name == 'wwan0') || ((name == 'eth2') && (module == '3g_ppp')) || (module == '3g')){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Mobile</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/3G.png" />'
+				);
+			}else if (name == 'wlan0'){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Wireless</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wifi.png" />'
+				);
+			}else {
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Wired</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/vlan.png" />'
+				);
+			}
+		}else{
+			if ((name == 'wm0') || (name == 'eth1(wimax)' && module == 'wimax') || (name == 'usb0') ){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">WiMAX</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wimax_disabled.png" />'
+				);
+			}else if ((name == '3g-ppp') || (name == 'wwan0') || ((name == 'eth2') && (module == '3g_ppp')) || (module == '3g')){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Mobile</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/3G_disabled.png" />'
+				);
+			}else if (name == 'wlan0'){
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Wireless</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wifi_disabled.png" />'
+				);
+			}else {
+				return String.format(
+					'<small style="position: relative; bottom: 3px; right: 5px;">Wired</small><img id="wanbar" style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/vlan_disabled.png" />'
+				);
+			}
+		}
+	}
+	function change(Field){
+		Field.style.color="#205599";
+	}
+	function back_change(Field){
+		Field.style.color="#404040";
+	}
+
+	var wifidevs = <%=luci.http.write_json(netdevs)%>;
+	var arptable = <%=luci.http.write_json(arpcache)%>;
+	function capitalize(s){
+		return s[0].toUpperCase() + s.slice(1);
+	}
+
+	XHR.poll(5, '<%=REQUEST_URI%>', { status: 1 },
+		function(x, info)
+		{
+			if (!info && x.responseText.search("UnikalusTekstinisStringasKitoTokioNiekurNera") != -1){
+				location.href=location.href;
+			}
+			var saDate = info.localtime.split(",");
+			var saTime = saDate[1].split(":");
+			saDate = saDate[0].split("-");
+
+
+			//============================system infomation ===========================
+			if ("<%=system_table%>" == 1){
+			var dtLocalDateTime = new Date(saDate[0], (saDate[1] - 1), saDate[2], saTime[0], saTime[1], saTime[2]);
+			var dtStartupDateTime = new Date(dtLocalDateTime.getTime() - info.uptime * 1000);
+
+			if ((e = document.getElementById('localtime'))){
+				var datet = info.localtime.split(",");
+				e.innerHTML = String.format('%s, %s', datet[0], datet[1]);
+			}
+			var all=info.uptime;
+			var d=parseInt(all/60/60/24);
+			var ds=parseInt(d*24*60*60);
+			var h=parseInt((all-ds)/60/60);
+			var hs=parseInt(h*60*60);
+			var m=parseInt((all-ds-hs)/60);
+			var ms=parseInt(m*60);
+			var sec=parseInt(all-ds-hs-ms);
+			var tss = String.format("<%=translate('%dd %dh %dm %ds')%>",d, h, m, sec);
+
+			if ((e = document.getElementById('uptime'))) {
+				var sStartupDateTime = String.format("%s-%s-%s, %s:%s:%s", dtStartupDateTime.getFullYear(), ('0' + (dtStartupDateTime.getMonth() + 1)).slice(-2),
+					('0' + dtStartupDateTime.getDate()).slice(-2),  ('0' + dtStartupDateTime.getHours()).slice(-2), ('0' + dtStartupDateTime.getMinutes()).slice(-2),
+					('0' + dtStartupDateTime.getSeconds()).slice(-2));
+				//e.innerHTML = String.format('%t', info.uptime) + String.format("<%=translate('(since %s)')%>", sStartupDateTime);
+				e.innerHTML = tss + String.format("<%=translate(' (since %s)')%>", sStartupDateTime);
+			}
+
+			if ((e = document.getElementById('loadavg'))) {
+				var iOneMin = info.loadavg[0] * 100;
+				var cpuload = Number(info.cpuload);
+				if (iOneMin > 100)
+					iOneMin = 100;
+				cpuload = cpuload.toFixed(1);
+				//e.innerHTML = String.format("<%=translate('%d%% CPU load')%>", iOneMin);
+				e.innerHTML = baravg(cpuload);
+			}
+
+			if ((e = document.getElementById('memfree'))){
+				var memfree = info.memfree / 1024;
+				var decPart = (memfree+"").split(".")[0];
+				var memtotal = info.memtotal / 1024;
+				var decParts = (memtotal+"").split(".")[0];
+				e.innerHTML = progressbar(decPart + " MB", decParts + " MB");
+			}
+			if ((e = document.getElementById('memflash'))){
+				var flashfree_used = info.flashfree / 1024;
+				var flashfree = flashfree_used.toFixed(1);
+				var a_flashspace = info.flashspace / 1024;
+				var flashspace = a_flashspace.toFixed(1);
+				e.innerHTML = progressbar_flash(flashfree + " MB", flashspace + " MB", + info.flashtotal + " MB");
+			}
+			if ((e = document.getElementById('fwver'))){
+				e.innerHTML = info.fwver;
+			}
+			}
+			//============================mobile infomation ===========================
+				if ("<%=mobile_table%>" == 1){
+				var dtLocalDateTime = new Date(saDate[0], (saDate[1] - 1), saDate[2], saTime[0], saTime[1], saTime[2]);
+				var dtStartupDateTime = new Date(dtLocalDateTime.getTime() - info.mobileuptime * 1000);
+				var gicon = get_icon_str((info.gsigstr != undefined) && (info.gsigstr != 0) && (info.gsigstr != "N/A"), parseInt(info.gsigstr));
+				if (gicon && (gicon != undefined)){
+					if ((e = document.getElementById('3gBar0'))){
+						e.src = gicon;
+					}
+				}
+
+				if ((e = document.getElementById('3gStr'))){
+					if(info.gsigstr == 'N/A' || !info.gsigstr)
+						e.innerHTML = "<%=translate('N/A')%>";
+					else if(info.gsigstr)
+						e.innerHTML = String.format('%d dBm', info.gsigstr);
+					//(info.gsigstr == 'N/A') ? e.innerHTML = info.gsigstr : (info.gsigstr) ? e.innerHTML = String
+				}
+
+				if ((e = document.getElementById('datacon'))){
+					if(info.mobileuptime == 0){
+						if(info.gstate){
+							info.gstate = info.gstate.charAt(0).toUpperCase() + (info.gstate).slice(1);
+						}else{
+							info.gstate = "N/A";
+						}
+						e.innerHTML = info.gstate;
+					}else{
+						all=info.mobileuptime;
+						d=parseInt(all/60/60/24);
+						ds=parseInt(d*24*60*60);
+						h=parseInt((all-ds)/60/60);
+						hs=parseInt(h*60*60);
+						m=parseInt((all-ds-hs)/60);
+						ms=parseInt(m*60);
+						sec=parseInt(all-ds-hs-ms);
+						tss = String.format("<%=translate('%dd %dh %dm %ds')%>",d, h, m, sec);
+
+						var sStartupDateTime = String.format("%s-%s-%s, %s:%s:%s", dtStartupDateTime.getFullYear(), ('0' + (dtStartupDateTime.getMonth() + 1)).slice(-2),
+							('0' + dtStartupDateTime.getDate()).slice(-2),  ('0' + dtStartupDateTime.getHours()).slice(-2), ('0' + dtStartupDateTime.getMinutes()).slice(-2),
+							('0' + dtStartupDateTime.getSeconds()).slice(-2));
+						e.innerHTML = tss + String.format("<%=translate(' (since %s)')%>", sStartupDateTime);
+					}
+				}
+
+				if ((e = document.getElementById('operstate'))){
+					if(info.netstate == "unregistered"){
+						e.innerHTML = "Unregistered";
+					}else{
+						if(info.goper){
+							info.goper = info.goper;
+						}else{
+							info.goper = "N/A";
+						}
+
+					if(info.netstate){
+						info.netstate = info.netstate.charAt(0).toUpperCase() + (info.netstate).slice(1);
+					}else{
+						info.netstate  = "N/A";
+					}
+
+					if(info.gctype){
+						info.gctype  = info.gctype;
+					}else{
+						info.gctype = "N/A";
+					}
+
+					e.innerHTML = info.netstate + '; ' + info.goper + '; ' + info.gctype;
+				}}
+
+				if ((e = document.getElementById('simstate'))){
+					if (info.sim_use == '1'){
+						info.sim_use = 'SIM 1';
+					}else if (info.sim_use == '0'){
+						info.sim_use = 'SIM 2';
+					}else {
+						info.sim_use = 'SIM 1';
+					}
+					if (info.gsim){
+						info.gsim = info.gsim;
+					}else{
+						info.gsim ='N/A';
+					}
+
+					e.innerHTML = info.sim_use + ' (' + info.gsim + ')';
+				}
+				if ((e = document.getElementById('databytes'))){
+					if ( convert(info.grecv) === "N/A B"){
+						e.innerHTML ="0 B / 0 B";
+					}else{
+						if (info.grecv){
+							var recvdat1 = info.grecv;
+							var recvdata1 = convert(info.grecv);
+							info.grecv = recvdata1;// + ' ('+recvdat1+' bytes)' ;
+						}
+						if (info.gsent){
+							var recvdat2 = info.gsent;
+							var recvdata2 = convert(info.gsent);
+							info.gsent = recvdata2 ;//+ ' ('+recvdat2+' bytes)' ;
+						}
+						if (info.gsent == ""){
+							info.gsent = "0 B";
+						}
+						if (info.grecv == ""){
+							info.grecv = "0 B";
+						}
+						e.innerHTML = info.grecv +" / "+ info.gsent;
+					}
+				}
+				}
+				//============================wireless infomation ===========================
+				if ("<%=wireless_table%>" == 1){
+				for (var didx = 0; didx < info.wifinets.length; didx++){
+					var dev = info.wifinets[didx];
+					var mode;
+					var s = '';
+					var allssid = "";
+					var mode_ap = 0;
+					var mode_sta = 0;
+					var all_mode = "";
+
+					if (info.iwinfo != null){
+						if ((e = document.getElementById('wifiname'))){
+							var iwinfo = info.iwinfo;
+							for (var i = 0; i < iwinfo.length; i++){
+								if (iwinfo[i]["mode"] == "Access Point (AP)" ){
+									mode = "(AP)";
+									mode_ap = mode_ap + 1;
+								}else if(iwinfo[i]["mode"] == "Station (STA)" ){
+									mode = "(STA)";
+									mode_sta = mode_sta + 1;
+								}
+
+								if (iwinfo[i]["encryption"] != 'no encryption'){
+									if (iwinfo.length == 1){
+										allssid = allssid + displaywifiprotection(1) + iwinfo[i]["name"] + " " + mode + " " ;
+									}else{
+										allssid = allssid + displaywifiprotection(1) + iwinfo[i]["name"] + " " + mode + "; " ;
+									}
+								}else{
+									if (iwinfo.length == 1){
+										allssid = allssid + displaywifiprotection(0) + iwinfo[i]["name"] + " " + mode + " " ;
+									}else{
+										allssid = allssid + displaywifiprotection(0) + iwinfo[i]["name"] + " " + mode + "; " ;
+									}
+								}
+							}
+
+							if (allssid.length > 250){
+								allssid = allssid.substring(0,250);
+								e.innerHTML = '<a href="<%=ds.build_url('admin/status/netinfo/wireless')%>" style="color: #404040;"><span onmouseout="back_change(this)" onmouseover="change(this)" >' + allssid + " ..." + '</span>' ;
+							}else{
+								e.innerHTML = '<a href="<%=ds.build_url('admin/status/netinfo/wireless')%>" style="color: #404040;"><span onmouseout="back_change(this)" onmouseover="change(this)" >' + allssid + '</span>';
+							}
+						}
+						if (mode_sta == 1){
+							all_mode = "1 - STA;";
+						}
+						if (mode_ap != 0){
+							all_mode = all_mode + " " + mode_ap + "- AP;";
+						}
+						if (dev.networks.length != null){
+							for (var nidx = 0; nidx < dev.networks.length; nidx++){ //ciklas eina kiek yra pakurta AP ir STA
+								var net = dev.networks[nidx];
+								if ((e = document.getElementById('wifimode'))){
+									e.innerHTML = all_mode + " " + net.channel + ' CH ('+ net.frequency +' GHz)';
+								}
+								s += String.format("123");
+								if ((e = document.getElementById('wifibar'))) {
+									e.innerHTML = displaywifi(1);
+								}
+							}
+						}
+					}
+					if (!s){
+						if ((e = document.getElementById('wifiname'))){
+							e.innerHTML = 'N/A';
+						}
+						if ((e = document.getElementById('wifimode'))){
+							e.innerHTML = 'N/A';
+						}
+						if ((e = document.getElementById('wifibar'))) {
+							e.innerHTML = displaywifi(0);
+						}
+					}
+				}
+				}
+				//============================wan infomation ===========================
+				if ("<%=wan_table%>" == 1){
+					var bridge_on = "<%=bridge_on and 1 or 0%>";
+					if ((e = document.getElementById('wanip'))){
+						if (bridge_on == "1" ) {
+							info.ipaddr = "- (bridge mode)";
+						}
+						else if (! info.ipaddr){
+							info.ipaddr = 'N/A';
+						}
+						else if ( info.ipaddr == '401'){
+							info.ipaddr = '<a href="<%=ds.build_url('admin/system/admin/wimax')%>" class="wimaxErrorLink" ><span>' + 'Invalid WiMAX password. Click here to change it' + '</span>';
+						}
+						e.innerHTML = info.ipaddr;
+					}
+					if ((e = document.getElementById('backupwan'))){
+						if (info.backupwan == 1){
+							info.backupwan = "Backup link is enabled";
+						}else{
+							info.backupwan = "Backup link is disabled"
+						}
+						e.innerHTML = info.backupwan;
+					}
+					if ((e = document.getElementById('wanbar'))) {
+						e.innerHTML = displaywan(info.ifname, info.moduleType, info.ipaddr);
+					}
+				}
+				//============================LAN infomation ===========================
+				if ("<%=local_network_table%>" == 1){
+				if ((e = document.getElementById('lan_address'))){
+					if (! info.lan_ipaddr){
+						info.lan_ipaddr = 'N/A';
+					}
+					e.innerHTML = info.lan_ipaddr +' / ' + info.lan_netmask;
+				}
+
+				if ((e = document.getElementById('connected_clients'))){
+					if (! info.dhcp_leases || info.dhcp_leases.length === undefined){
+						e.innerHTML = '0';
+					}
+					else{
+						e.innerHTML = info.dhcp_leases.length;
+					}
+
+				}
+				}
+				//============================Access controll ===========================
+				if ("<%=access_control_table%>" == 1){
+				if ((e = document.getElementById('lan_allowed'))){
+					var string = "";
+					var add_col = false;
+					if (info.ssh && info.ssh == 1 ){
+						add_col = true
+						string += "SSH";
+					}
+					if (info.http && info.http == 1 ){
+						if (add_col)
+							string += "; "
+						else
+							add_col = true
+						string += "HTTP"
+					}
+					if (info.https && info.https == 1 ){
+						if (add_col)
+							string += "; "
+						else
+							add_col = true
+						string += "HTTPS"
+					}
+					if (! string || string == "")
+						string += "No access"
+					e.innerHTML = string;
+				}
+				if ((e = document.getElementById('wan_allowed'))){
+					var string = "";
+					var add_col = false;
+					if (info.wan_ssh && info.wan_ssh == 1 ){
+						add_col = true
+						string += "SSH";
+					}
+					if (info.wan_http && info.wan_http == 1 ){
+						if (add_col)
+							string += "; "
+						else
+							add_col = true
+						string += "HTTP"
+					}
+					if (info.wan_https && info.wan_https == 1 ){
+						if (add_col)
+							string += "; "
+						else
+							add_col = true
+						string += "HTTPS"
+					}
+					if (! string || string == "")
+						string += "No access"
+					e.innerHTML = string;
+				}
+			}
+				//============================event table ===========================
+				function timeconvert(time){
+					var d = time;
+					d = parseInt(d);
+					n = new Date(d *1000);
+					var year = n.getFullYear();
+					var month = n.getMonth()+1;
+					var day = n.getDate();
+
+					var hour = n.getHours();
+					var min = n.getMinutes();
+					var sec = n.getSeconds();
+					return date =  orzero(year) + '-' +  orzero(month) + '-' +  orzero(day) + ', ' +  orzero(hour) + ':' +  orzero(min) + ':' +  orzero(sec);
+				}
+				function orzero(value){
+					if (value < 10){
+						value = "0" + value;
+					}
+					return value;
+				}
+
+				for (var i = 0; i < 4; i++){
+					if ("<%=system_events_table%>" == 1){
+						if ((e = document.getElementById('e'+i))){
+							if (info.eventTable[0]){
+								//var systemevent = timeconvert(info.eventTable[i][1]) + " - " + info.eventTable[i][2]+ ": " + info.eventTable[i][3];
+								var systemevent = info.eventTable[i][1] + " - " + info.eventTable[i][2]+ ": " + info.eventTable[i][3];
+								if (systemevent.length > 62){
+									systemevent = systemevent.substring(0,62) + " ...";
+								}
+								e.innerHTML = systemevent;
+							}else{
+								e.innerHTML = "";
+							}
+						}
+					}
+
+					if ("<%=network_events_table%>" == 1){
+					if ((e = document.getElementById('n'+i))){
+						if (info.networkTable[0]){
+							//var networkevent = timeconvert(info.networkTable[i][1]) + " - " /*+ info.networkTable[i][2]+ ": "*/ + info.networkTable[i][3];
+							var networkevent = info.networkTable[i][1] + " - " /*+ info.networkTable[i][2]+ ": "*/ + info.networkTable[i][3];
+							if (networkevent.length > 62){
+								networkevent = networkevent.substring(0,62) + " ...";
+							}
+							e.innerHTML = networkevent;
+						}else{
+							e.innerHTML = "";
+						}
+					}
+				}
+		}
+		//============================SMS Counter table===========================
+		if("<%=sms_counter_table%>" == 1){
+			if (info.send_sms){
+				document.getElementById('sms_send1').innerHTML = info.send_sms[0];
+				document.getElementById('sms_send2').innerHTML = info.send_sms[1];
+				document.getElementById('sms_recieved1').innerHTML = info.recieved_sms[0];
+				document.getElementById('sms_recieved2').innerHTML = info.recieved_sms[1];
+			}
+		}
+		//============================Open VPN===========================
+		if("<%=open_vpn_table%>" == 1){
+			if (info.open_vpn){
+				for(i = 0; i < info.open_vpn_names.length ; i++){
+					//find vpn
+					t=0;
+					while(t<info.open_vpn[0][0].length){
+						if(info.open_vpn[t][0][0] == info.open_vpn_names[i]){
+							break;
+						}
+						t++;
+					}
+					document.getElementById('vpn_status'+(i+1)).innerHTML = info.open_vpn[t][0][1] + ";";
+					if(info.open_vpn[t][0][5] != ""){
+						all=info.open_vpn[t][0][5];
+						d=parseInt(all/60/60/24);
+						ds=parseInt(d*24*60*60);
+						h=parseInt((all-ds)/60/60);
+						hs=parseInt(h*60*60);
+						m=parseInt((all-ds-hs)/60);
+						ms=parseInt(m*60);
+						sec=parseInt(all-ds-hs-ms);
+						tss = String.format('%dh %dm %ds', h, m, sec);
+						if(d!=0){
+							 tss = String.format('%dd %s', d, tss);
+						}
+					}else{
+						tss = "N/A";
+					}
+					document.getElementById('vpn_status'+(i+1)).innerHTML = info.open_vpn[t][0][1] + "; "+ tss;
+					if(info.open_vpn[t][0][2] == "server"){
+						if(info.open_vpn[t][0][3] == ""){
+							ip_vpn = "N/A";
+						}else{
+							ip_vpn = info.open_vpn[t][0][3];
+						}
+					}else{
+						if(info.open_vpn[t][0][6] == ""){
+							ip_vpn = "N/A";
+						}else{
+							ip_vpn = info.open_vpn[t][0][6];
+						}
+					}
+					document.getElementById('vpn_type'+(i+1)).innerHTML = capitalize(info.open_vpn[t][0][2]) + "; " + ip_vpn;
+				}
+			}
+		}
+		//============================Hotspot===========================
+		if("<%=hotspot_table%>" == 1){
+			if (info.hotspots_status){
+				for(q = 0; q < info.hotspots_status.length; q++){
+					if(info.hotspots_status[q] == 1){
+						hotspot_status = "Enabled; ";
+					}else{
+						hotspot_status = "Disabled; ";
+					}
+					hotspot_status += "(" + info.hotspot_users[q] + " Clients)";
+				document.getElementById('hotspot_status'+(q+1)).innerHTML = hotspot_status;
+				document.getElementById('hotspot_data'+(q+1)).innerHTML = convert(info.hotspot_received[q]) + " / " + convert(info.hotspot_sent[q]);
+				}
+			}
+		}
+		//============================VRRP===========================
+		if("<%=vrrp_table%>" == 1){
+			if (info.vrrp_status){
+				if(info.vrrp_router_status != null && info.vrrp_router_status != ""){
+					vrrp_router_status = info.vrrp_router_status + " mode";
+				}else{
+					vrrp_router_status = "N/A";
+				}
+				if(info.vrrp_priority != null){
+					vrrp_priority = info.vrrp_priority;
+				}else{
+					info.vrrp_priority = "N/A";
+				}
+				if(info.vrrp_status == "1"){
+						vrrp_status = "Enabled; " + vrrp_router_status + "; Priority - " + info.vrrp_priority ;
+				}else{
+					vrrp_status = "Disabled; N/A" + "; " + "Priority - " + info.vrrp_priority;
+				}
+				document.getElementById('vrrp_status').innerHTML = vrrp_status;
+				vrrp_ip = "";
+				for(y=0; y < info.vrrp_ip.length; y++){
+					if(y == 2){
+						vrrp_ip = vrrp_ip.substring(0, vrrp_ip.length - 1) + " ... ";
+						break
+					}
+					vrrp_ip += info.vrrp_ip[y] + "/";
+				}
+				if(info.vrrp_ip.length == null){
+					vrrp_ip += "N/A" + "/";
+				}
+				document.getElementById('vrrp_ip').innerHTML = vrrp_ip.substring(0, vrrp_ip.length - 1);
+
+			}
+		}
+		//============================Monitoring===========================
+		if("<%=monitoring_table%>" == 1){
+			if (info.monitoring_status){
+				if (info.monitoring_status == "1"){
+					monitoring_status = "Enabled";
+				}else{
+					monitoring_status = "Disabled";
+				}
+				document.getElementById('monitoring_status').innerHTML = monitoring_status;
+				if (info.monitoring_router_status != null && info.monitoring_router_status != ""){
+					monitoring_router_status = info.monitoring_router_status;
+				}else{
+					monitoring_router_status = "N/A";
+				}
+				document.getElementById('monitoring_router_status').innerHTML = monitoring_router_status;
+			}
+		}
+		//============================Wimax===========================
+		if("<%=wimax_table%>" == 1){
+			
+			var gicon = get_icon_str_wimax((info.wsigstr != undefined) && (info.wsigstr != 0) && (info.wsigstr != "N/A") && (info.wsigstr != "-"), parseInt(info.wsigstr));
+					if (gicon && (gicon != undefined)){
+						if ((e = document.getElementById('WBar0'))){
+							e.src = gicon;
+						}
+					}
+			
+			if (info.wtime && info.wtime != "401"){
+				
+				if ((e = document.getElementById('WStr'))){
+					if(info.wsigstr == 'N/A' || !info.wsigstr)
+						e.innerHTML = "<%=translate('N/A')%>";
+					else if(info.wsigstr)
+						e.innerHTML = String.format('%d dBm', info.wsigstr);
+					//(info.wsigstr == 'N/A') ? e.innerHTML = info.wsigstr : (info.wsigstr) ? e.innerHTML = String
+				}
+				if ((e = document.getElementById('wimax_uptime')))
+					e.innerHTML = (String.format('%T', info.wtime));
+				if ((e = document.getElementById('wimax_state')))
+					(info.wstate) ? e.innerHTML = info.wstate : "N/A"
+				if ((e = document.getElementById('wimax_sigqual')))
+					(info.wsigqual) ? e.innerHTML = info.wsigqual : "N/A"
+				if ((e = document.getElementById('wimax_mac')))
+					(info.wmac) ? e.innerHTML = info.wmac : "N/A"
+			}
+			else if (info.wtime && info.wtime == "401"){
+				if ((e = document.getElementById('Wlink')))
+					e.style.display="inline";
+			}
+			else{
+				if ((e = document.getElementById('WStr')))
+					e.innerHTML = "N/A";
+				if ((e = document.getElementById('wimax_uptime')))
+					e.innerHTML = "N/A";
+				if ((e = document.getElementById('wimax_state')))
+					e.innerHTML = "N/A"
+				if ((e = document.getElementById('wimax_sigqual')))
+					e.innerHTML = "N/A"
+				if ((e = document.getElementById('wimax_mac')))
+					e.innerHTML = "N/A"
+			}
+		
+		}
+	}
+	);
+function convert(bytes){
+	var constant = 1024;
+	var recvdata = bytes;
+	if (recvdata > constant){
+		recvdata = recvdata / constant;
+		if (recvdata > constant ){
+			recvdata = recvdata / constant;
+			if (recvdata > constant ){
+				recvdata = recvdata / constant;
+				recvdata =  recvdata.toFixed(1) + " GB";
+			}else{
+				recvdata =  recvdata.toFixed(1) + " MB";
+			}
+		}else{
+			recvdata =  recvdata.toFixed(1) + " KB";
+		}
+	}else{
+		recvdata =  recvdata + " B";
+	}
+	return recvdata;
+}
+function get_icon_str(avail, srenght){
+var icon;
+	if (!avail)
+		icon = "<%=resource%>/icons/signalnone.png";
+	else if (srenght > -52)
+		icon = "<%=resource%>/icons/signal100.png";
+	else if (srenght > -67)
+		icon = "<%=resource%>/icons/signal80.png";
+	else if (srenght > -82)
+		icon = "<%=resource%>/icons/signal60.png";
+	else if (srenght > -97)
+		icon = "<%=resource%>/icons/signal40.png";
+	else if (srenght > -112)
+		icon = "<%=resource%>/icons/signal20.png";
+	else if (srenght <= -112)
+		icon = "<%=resource%>/icons/signal0.png";
+	return icon;
+}
+
+function g3Load0(){
+	if ((e = document.getElementById('3gBar1')))
+		e.style.visibility = 'hidden';
+	if ((e = document.getElementById('3gBar0')))
+		e.style.visibility = 'visible';
+	if ((e = document.getElementById('wifibar')))
+		e.style.visibility = 'visible';
+	if ((e = document.getElementById('wanbar')))
+		e.style.visibility = 'visible';
+	if ((e = document.getElementById('WBar0')))
+		e.style.visibility = 'visible';
+}
+
+// Si funkcija turi buti paskutine java script'e, kitaip proxy iskaraipo koda pasiekiant per monitoring
+function get_icon_str_wimax(avail, srenght){
+var icon;
+	if (!avail)
+		icon = "<%=resource%>/icons/signalnone.png";
+	else if (srenght >= -60)
+		icon = "<%=resource%>/icons/signal100.png";
+	else if (srenght >= -70)
+		icon = "<%=resource%>/icons/signal80.png";
+	else if (srenght >= -80)
+		icon = "<%=resource%>/icons/signal60.png";
+	else if (srenght >= -90)
+		icon = "<%=resource%>/icons/signal40.png";
+	else if (srenght >= -105)
+		icon = "<%=resource%>/icons/signal20.png";
+	else if (srenght < -105)
+		icon = "<%=resource%>/icons/signal-0.png";
+	return icon;
+}
+
+AddWindowOnLoadEvent(g3Load0);
+//]]></script>
+<style>
+	.no-border{
+		border-top:none;
+		border-bottom:none;
+	}
+</style>
+<h2 style="margin-bottom: 0px;"><a id="content" name="content" ><%=translate("Overview")%></a></h2>
+<%
+
+	side = "right"
+	function sides()
+		if side == "right" then
+			side = "left"
+		else
+			side = "right"
+		end
+		return side
+	end
+	function print_table(num)
+		if num == 1 then %>
+			<div style="width:456px;float:<%=sides()%>" id="system_table">
+				<fieldset class="cbi-section">
+				<legend style="width:446px;float:<%=side%>; height: 15px;"><span style="color: #404040;"><%=translate("System")%></span>
+				<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Detailed information')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/sysinfo')%>"></a></span>
+				<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Configuration')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/services/ntpc')%>"></a></span>
+				<span style="float: right; position: relative; bottom: 10px; margin-right:10px;" id="loadavg"></span></legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+				<tr><td width="33%"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Indicates how much time have passed since the last router start up. Format [days hours minutes seconds (since year-month-day, hours:minutes:seconds)]')%>')"</span><%=translate("Router uptime")%></td><td colspan="2" id="uptime">-</td></tr>
+				<tr><td width="33%"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Device\\\'s current system time. Format [year-month-day, hours:minutes:seconds]')%>')"</span><%=translate("Local device time")%></td><td colspan="2" id="localtime">-</td></tr>
+				<tr><td width="33%"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('The amount of random access memory that is completely free')%>')"style="color:rgb(64, 64, 64);"><%=translate("Free memory")%></span> </td><td id="memfree">-</td><td id="memflash">-</td></tr>
+				<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('The version of the firmware that is currently loaded on the router')%>')"</span><%=translate("Firmware version")%></td><td colspan="2" id="fwver">-</td></tr>
+				</table>
+		</div>
+	<%
+	end
+
+		if num == 2 then %>
+			<div style="width:456px;float:<%=sides()%>" id="mobile_table">
+				<fieldset class="cbi-section">
+					<legend id="g3BarsShow" style="width:446px;float:<%=side%>; height: 15px;">
+						<span style="color: #404040;"><%=translate("Mobile")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Detailed information')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Configuration')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/network/mobile')%>"></a></span>
+						<div style="float:right; position: relative; bottom: 4px;">
+							<small id="3gStr"></small>
+							<img id="3gBar0" style="visibility: visible; margin-right:10px" onload="g3Load0()" src="<%=resource%>/icons/signal0.png" />
+						</div>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Indicates how long a mobile connection is available for. Format [days hours minutes seconds (since year-month-day, hours:minutes:seconds)]')%>')" onmouseout="HideHint(this)"><%=translate("Data connection ")%></span> </td><td id="datacon">-</td></tr>
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Mobile data connection state; operator; type')%>')" onmouseout="HideHint(this)"><%=translate("State")%></span> </td><td id="operstate">-</td></tr>
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Which SIM card slot is in use and in what state it is, e.g. PIN required, Not inserted, etc')%>')" onmouseout="HideHint(this)"><%=translate("SIM card slot in use")%></span> </td><td id="simstate">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Amount of bytes which were received/sent via mobile data connection')%>')" onmouseout="HideHint(this)"><%=translate("Bytes received/sent")%> *</span> </td><td id="databytes">-</td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 3 then %>
+			<div style="width:456px;float:<%=sides()%>" id="wireless_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>; height: 15px;"><span style="color: #404040;"><%=translate("Wireless")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Detailed information")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo/wireless/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Configuration")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/network/wireless')%>"></a></span>
+						<div id="wifibar" style="float:right;">
+							<img style="visibility: visible; margin-right:10px" src="<%=resource%>/icons/wifi_disabled.png" />
+						</div>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('SSID (service set identifier) is an unique indentifier that identifies a wireless network')%>')" onmouseout="HideHint(this)"><%=translate("SSID")%></span> </td>  <td  id="wifiname">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies connection mode. It can either be Access Point (AP) or Client.')%>')" onmouseout="HideHint(this)"><%=translate("Mode")%></span> </td><td id="wifimode">-</td></tr>
+				</table>
+			</div>
+		<%end
+
+		if num == 4 then %>
+			<div style="width:456px;float:<%=sides()%>" id="wan_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>; height: 15px;"><span style="color: #404040;"><%=translate("WAN")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Detailed information")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo/wan/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Configuration")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/network/wan')%>"></a></span>
+						<div id="wanbar" style="float:right;">
+						</div>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies an IP address that the router uses to connect to the Internet')%>')" onmouseout="HideHint(this)"><%=translate("IP address")%></span> </td><td id="wanip">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies if WAN (wide area network) backup link is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Backup WAN status")%></span> </td><td id="backupwan">-</td></tr>
+				</table>
+			</div>
+		<%end
+
+		if num == 5 then %>
+			<div style="width:456px;float:<%=sides()%>" id="local_network_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>; height: 15px;"><span style="color: #404040;"><%=translate("Local Network")%></span>
+					<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Detailed information")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo/lan/')%>"></a></span>
+					<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate("Configuration")%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/network/lan')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('')%>')" onmouseout="HideHint(this)"><%=translate("IP / netmask")%></span> </td>  <td  id="lan_address">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('')%>')" onmouseout="HideHint(this)"><%=translate("Clients connected")%></span> </td><td id="connected_clients">-</td></tr>
+				</table>
+			</div>
+		<%end
+
+		if num == 6 then %>
+			<div style="width:456px;float:<%=sides()%>" id="access_control_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>; height: 15px;"><span style="color: #404040;"><%=translate("Access Control")%></span>
+					<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Detailed information')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo/access/')%>"></a></span>
+					<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Configuration')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/system/admin/access_control/')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('')%>')" onmouseout="HideHint(this)"><%=translate("LAN")%></span> </td><td id="lan_allowed">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('')%>')" onmouseout="HideHint(this)"><%=translate("WAN")%></span> </td><td id="wan_allowed">-</td></tr>
+				</table>
+			</div>
+		<%end
+
+		if num == 7 then %>
+			<div style="width:456px;float:<%=sides()%>" id="system_events_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate("Recent System Events")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Detailed information')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/event/log/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Configuration')%>')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/status/event/report/')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:<%=side%>">
+					<tr><td width="5%"><span >1</span> </td><td id="e0"></td></tr>
+					<tr><td width="5%"><span >2</span> </td><td id="e1"></td></tr>
+					<tr><td width="5%"><span >3</span> </td><td id="e2"></td></tr>
+					<tr><td width="5%"><span >4</span> </td><td id="e3"></td></tr>
+				</table>
+			</div>
+		<%end
+
+		if num == 8 then %>
+			<div style="width:456px;float:<%=sides()%>" id="network_events_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate("Recent Network Events")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/event/connect/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/status/event/report/')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width="5%"><span >1</span> </td><td id="n0"></td></tr>
+					<tr><td width="5%"><span >2</span> </td><td id="n1"></td></tr>
+					<tr><td width="5%"><span >3</span> </td><td id="n2"></td></tr>
+					<tr><td width="5%"><span >4</span> </td><td id="n3"></td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 9 then %>
+			<div style="width:456px;float:<%=sides()%>" id="sms_counter_table">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate("SMS Counter")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"> &nbsp<a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/services/sms_gateway/sms_counter/')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width=""><span >SIM 1</span> <td id="">Sms sent</td><td id="sms_send1">-</td><td id="">Sms received</td><td id="sms_recieved1">-</td></tr>
+					<tr><td width=""><span >SIM 2</span> <td id="">Sms sent</td><td id="sms_send2">-</td><td id="">Sms received</td><td id="sms_recieved2">-</td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 10 then
+			vpn_counter = vpn_counter +1%>
+			<div style="width:456px;float:<%=sides()%>" id="open_vpn_table<%=vpn_counter%>">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate(open_vpn_names[vpn_counter].." VPN")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('/admin/status/netinfo/openvpn/'..open_vpn_names[vpn_counter])%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('/admin/services/vpn/cbasic/'..open_vpn_names[vpn_counter])%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width="33%"><span >Status</span> <td id="vpn_status<%=vpn_counter%>">-</td></tr>
+					<tr><td width="33%"><span >Type</span> <td id="vpn_type<%=vpn_counter%>">-</td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 11 then
+			hotspot_counter = hotspot_counter +1%>
+			<div style="width:456px;float:<%=sides()%>" id="hotspot_table<%=hotspot_counter%>">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate(hotspots_ssid[hotspot_counter].." Hotspot")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('admin/services/hotspot/general/clients/'..show_hotspots[hotspot_counter])%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('admin/services/hotspot/general/'..show_hotspots[hotspot_counter])%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width="33%"><span >Status</span> <td id="hotspot_status<%=hotspot_counter%>">-</td></tr>
+					<tr><td width="33%"><span >Bytes received/sent</span> <td id="hotspot_data<%=hotspot_counter%>">-</td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 12 then%>
+			<div style="width:456px;float:<%=sides()%>" id="vrrp">
+				<fieldset class="cbi-section">
+					<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate("VRRP")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('admin/status/netinfo/vrrp/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('admin/services/vrrp')%>"></a></span>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width="33%"><span >Status</span> <td id="vrrp_status">-</td></tr>
+					<tr><td width="33%"><span >Virtual IP</span> <td id="vrrp_ip">-</td></tr>
+				</table>
+			</div>
+		<%end
+		if num == 13 then%>
+			<div style="width:456px;float:<%=sides()%>" id="monitoring_table">
+				 <fieldset class="cbi-section">
+				 	<legend style="width:446px;float:<%=side%>;"><span style="color: #404040;"><%=translate("Monitoring")%></span>
+				 	<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('admin/system/admin/monitoring/')%>"></a></span>
+				 		<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%=ds.build_url('admin/system/admin/monitoring/')%>"></a></span>
+				 	</legend>
+				 </fieldset>
+				 <table class="cbi-section-table" style="margin-top:10px;float:left">
+				 	<tr><td width="33%"><span >Status</span> <td id="monitoring_status">-</td></tr>
+				 	<tr><td width="33%"><span >Connection State</span> <td id="monitoring_router_status">-</td></tr>
+				 </table>
+			</div>
+		<%end
+		if num == 14 then%>
+			<div style="width:456px;float:<%=sides()%>" id="wimax_table">
+				<fieldset class="cbi-section">
+					<legend id="g3BarsShow" style="width:446px;float:<%=side%>; height: 15px;">
+						<span style="color: #404040;"><%=translate("WiMAX")%></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Detailed information")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-info_icon" href="<%=ds.build_url('admin/status/netinfo/wimax/')%>"></a></span>
+						<span onmouseout="HideHint(this)" onmouseover="ShowHint(this, \'<%=translate("Configuration")%>\')"style="color:rgb(64, 64, 64);"><a class="overview-mini-settings_icon" href="<%='http://' .. ip_address .. ':' .. wimax_port%>" target="_blank"></a></span>
+						<div style="float:right; position: relative; bottom: 4px;">
+							<a href="<%=ds.build_url('admin/system/admin/wimax/')%>" id="Wlink" class="wimaxErrorLink" style="display:none;"> <%=translate('Invalid WiMAX password. Click here to change it')%>&#160; </a>
+							<small id="WStr"></small>
+							<img id="WBar0" style="visibility: visible; margin-right:10px" onload="g3Load0()" src="<%=resource%>/icons/signal0.png" />
+						</div>
+					</legend>
+				</fieldset>
+				<table class="cbi-section-table" style="margin-top:10px;float:left">
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies an IP address that the router uses to connect to the Internet')%>')" onmouseout="HideHint(this)"><%=translate("Data connection state")%></span> </td><td id="wimax_state">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies if WAN (wide area network) backup link is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Data connection uptime")%></span> </td><td id="wimax_uptime">-</td></tr>
+					<tr><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies an IP address that the router uses to connect to the Internet')%>')" onmouseout="HideHint(this)"><%=translate("Signal quality")%></span> </td><td id="wimax_sigqual">-</td></tr>
+					<tr style="border-bottom: 1px solid #DDD;"><td width="33%"><span onmouseover="ShowHint(this, '<%=translate('Specifies if WAN (wide area network) backup link is enabled')%>')" onmouseout="HideHint(this)"><%=translate("MAC address")%></span> </td><td id="wimax_mac">-</td></tr>
+				</table>
+			</div>
+		<%end
+	end
+	--tables rows
+	rows = {}
+	--system_table rows
+	rows[#rows + 1] = 4
+	--mobile_table rows
+	rows[#rows + 1] = 4
+	--wireless_table rows
+	rows[#rows + 1] = 2
+	--wan_table rows
+	rows[#rows + 1] = 2
+	--local_network_table rows
+	rows[#rows + 1] = 2
+	--access_control_table rows
+	rows[#rows + 1] = 2
+	--system_events_table rows
+	rows[#rows + 1] = 4
+	--network_events_table rows
+	rows[#rows + 1] = 4
+	--sms_counter_table rows
+	rows[#rows + 1] = 2
+	--vpn_table rows
+	for u=1,#open_vpn_names do
+		rows[#rows + 1] = 2
+	end
+	if #open_vpn_names == 0 then
+		rows[#rows + 1] = 2
+	end
+	--hotspot_table rows
+	for t=1, #show_hotspots do
+		rows[#rows + 1] = 2
+	end
+	if #show_hotspots == 0 then
+		rows[#rows + 1] = 2
+	end
+	--vrrp_table rows
+	rows[#rows + 1] = 2
+	--monitoring_table rows
+	rows[#rows + 1] = 2
+	--wimax_table rows
+	rows[#rows + 1] = 4
+
+	-- tables names
+	tables = {}
+	if system_table == "1" then
+		tables[#tables+1] = 1
+	end
+	if mobile_table == "1" then
+		tables[#tables+1] = 2
+	end
+	if wireless_table == "1" then
+		tables[#tables+1] = 3
+	end
+	if wan_table == "1" then
+		tables[#tables+1] = 4
+	end
+	if local_network_table == "1" then
+		tables[#tables+1] = 5
+	end
+	if access_control_table == "1" then
+		tables[#tables+1] = 6
+	end
+	if system_events_table == "1" then
+		tables[#tables+1] = 7
+	end
+	if network_events_table == "1" then
+		tables[#tables+1] = 8
+	end
+	if sms_counter_table == "1" then
+		tables[#tables+1] = 9
+	end
+	if open_vpn_table == "1" then
+		vpn_counter = 0
+		for u=1,#open_vpn_names do
+			tables[#tables+1] = 10
+		end
+	end
+	if hotspot_table == "1" then
+		hotspot_counter = 0
+		for u=1,#show_hotspots do
+			tables[#tables+1] = 11
+		end
+	end
+	if vrrp_table == "1" then
+		tables[#tables+1] = 12
+	end
+	if monitoring_table == "1" then
+		tables[#tables+1] = 13
+	end
+	if wimax_table == "1" then
+		tables[#tables+1] = 14
+	end
+	-- printing tables
+	function check_used_tables(tab)
+		local inlist = false
+		for u = 1, #used_tables do
+			if tab == used_tables[u] then
+				inlist = true
+			end
+		end
+		return inlist
+	end
+
+	used_tables = {}
+	%><table style="width:100%" id="tables">
+	<%for i = 1, #tables do
+		if check_used_tables(i) == false then
+			for e = i + 1, #tables do
+				if rows[tables[i]] == rows[tables[e]] then
+				%>
+				<tr>
+					<td class="no-border"><%print_table(tables[i])%></td>
+					<td class="no-border"><%print_table(tables[e])%></td>
+				</tr>
+					<%used_tables[#used_tables+1] = e
+					used_tables[#used_tables+1] = i
+					break
+				end
+			end
+		end
+	end
+
+	not_used_tables = #tables - #used_tables
+	for y = 1, not_used_tables do
+		if y%2~=0 then%>
+			<tr>
+		<%end
+		not_used_max_rows = 0
+		table_index = 0
+		for o = 1, #tables do
+			if check_used_tables(o) == false and not_used_max_rows < rows[tables[o]] then
+				not_used_max_rows = rows[tables[o]]
+				table_index = o
+			end
+		end
+		used_tables[#used_tables+1] = table_index%>
+			<td class="no-border"><%print_table(tables[table_index])%></td>
+		<%if y%2==0 or y == not_used_tables then%>
+			</tr>
+		<%end
+	end
+
+%>
+</table>
+<%if mobile_table == "1" then %>
+<div class="disclaimer_msg" style="display:inline-block;width:100%">
+	<span>* <%=translate("Your carrier\'s data usage accounting may differ. Teltonika is not liable should any accounting discrepancies occur.")%></span>
+</div>
+<%end%>
+
+<%+footer%>

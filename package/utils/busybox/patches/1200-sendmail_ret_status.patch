@@ -1,0 +1,92 @@
+--- a/mailutils/sendmail.c
++++ b/mailutils/sendmail.c
+@@ -42,10 +42,12 @@
+ 
+ #include "libbb.h"
+ #include "mail.h"
++#include <fcntl.h>
+ 
+ // limit maximum allowed number of headers to prevent overflows.
+ // set to 0 to not limit
+ #define MAX_HEADERS 256
++#define MY_PIPE "/tmp/my_pipe"
+ 
+ static void send_r_n(const char *s)
+ {
+@@ -110,6 +112,12 @@
+ 		bb_error_msg("Bad recipient: <%s>", s);
+ }
+ 
++int FileExist(const char *filename) {
++	struct stat st;
++	int result = stat(filename, &st);
++	return result == 0;
++}
++
+ int sendmail_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+ int sendmail_main(int argc UNUSED_PARAM, char **argv)
+ {
+@@ -120,7 +128,12 @@
+ 	char *domain = sane_address(safe_getdomainname());
+ 	unsigned nheaders = 0;
+ 	int code;
++	int l = 0;
+ 
++	/* create the FIFO (named pipe) */
++	if (!FileExist(MY_PIPE)) {
++		mkfifo(MY_PIPE, 0666);
++	}
+ 	enum {
+ 	//--- standard options
+ 		OPT_t = 1 << 0,         // read message for recipients, append them to those on cmdline
+@@ -171,6 +184,9 @@
+ 
+ 	// connect to server
+ 
++	/* write to the FIFO */
++	l = open(MY_PIPE, O_WRONLY | O_NONBLOCK);
++
+ 	// connection helper ordered? ->
+ 	if (opts & OPT_H) {
+ 		const char *args[] = { "sh", "-c", opt_connect, NULL };
+@@ -193,16 +209,21 @@
+ 		xdup2(STDIN_FILENO, STDOUT_FILENO);
+ 	}
+ 	// N.B. from now we know nothing about network :)
+-
+ 	// wait for initial server OK
+ 	// N.B. if we used openssl the initial 220 answer is already swallowed during openssl TLS init procedure
+ 	// so we need to kick the server to see whether we are ok
+ 	code = smtp_check("NOOP", -1);
+ 	// 220 on plain connection, 250 on openssl-helped TLS session
+-	if (220 == code)
++	if (220 == code){
+ 		smtp_check(NULL, 250); // reread the code to stay in sync
+-	else if (250 != code)
++	}else if (250 != code){
+ 		bb_error_msg_and_die("INIT failed");
++	}
++
++	//irsyti i pipe, kad network ok
++	if (l != -1) {
++		write(l, "Network ok", strlen("Network ok"));
++	}
+ 
+ 	// we should start with modern EHLO
+ 	if (250 != smtp_checkp("EHLO %s", domain, -1)) {
+@@ -335,6 +356,15 @@
+ 	// ... and say goodbye
+ 	smtp_check("QUIT", 221);
+ 	// cleanup
++//irasyti i pipe, kad mail issiustas
++	if (l != -1) {
++		write(l, "Email sent", strlen("Email sent"));
++		close(l);
++	}
++
++	/* remove the FIFO */
++	//unlink(myfifo);
++
+ 	if (ENABLE_FEATURE_CLEAN_UP)
+ 		fclose(G.fp0);
+ 

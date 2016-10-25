@@ -1,0 +1,14 @@
+ etc/iproute2/rt_tables | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/etc/iproute2/rt_tables b/etc/iproute2/rt_tables
+index 541abfd..373b9a8 100644
+--- a/etc/iproute2/rt_tables
++++ b/etc/iproute2/rt_tables
+@@ -9,3 +9,6 @@
+ # local
+ #
+ #1	inr.ruhep
++200 wan
++201 wan2
++202 wan3

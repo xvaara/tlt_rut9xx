@@ -1,0 +1,4 @@
+config wifid 'default_server'
+	option enabled '1'
+	option debug '0'
+	option port '10000'

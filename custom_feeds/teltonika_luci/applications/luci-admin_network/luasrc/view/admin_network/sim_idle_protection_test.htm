@@ -1,0 +1,1061 @@
+<%
+local utl = require "luci.util"
+
+prim_sim = utl.trim(luci.sys.exec("uci get simcard.simcard.default"))
+get_net_wan = utl.trim(luci.sys.exec("uci get network.wan.ifname"))
+mwmode = tonumber(utl.trim(luci.sys.exec("uci get -q network.ppp.mwmode")))
+sim = prim_sim
+
+step = tonumber(luci.http.formvalue("step"))
+
+simm = luci.http.formvalue("sim")
+
+if simm == "sim1" then
+	sim = "sim1"
+elseif simm == "sim2" then
+	sim = "sim2"
+else
+	sim = prim_sim
+end
+
+function start()
+	luci.sys.exec("uci show network.wan > /tmp/sim_idle_tmp")
+	luci.sys.exec("uci show network.ppp >> /tmp/sim_idle_tmp")
+end
+
+function to_sim1()
+	luci.sys.exec("sim_switch change sim1 > /dev/null 2>&1")
+end
+
+function to_sim2()
+	luci.sys.exec("sim_switch change sim2 > /dev/null 2>&1")
+end
+
+function ping_host()
+	local con_state = utl.trim(luci.sys.exec("gsmctl -j"))
+	ping_ip = utl.trim(luci.sys.exec("uci get sim_idle_protection." .. sim .. ".host"))
+	local ping_c = utl.trim(luci.sys.exec("uci get sim_idle_protection." .. sim .. ".count"))
+	local ping_s = utl.trim(luci.sys.exec("uci get sim_idle_protection." .. sim .. ".packet_size"))
+	local COUNT = 0
+
+	while con_state ~= "connected" do
+		con_state = utl.trim(luci.sys.exec("gsmctl -j"))
+		COUNT = COUNT + 1
+		luci.sys.exec("sleep 5")
+		if COUNT == 10 then
+			break
+		end
+	end
+
+	respo = tonumber(utl.trim(luci.sys.exec("ping ".. ping_ip .. " -c " .. ping_c .. " -s " .. ping_s .. " > /dev/null 2>/dev/null ; echo $?")))
+
+	if respo == 1 then
+		return 1
+	end
+	if respo == 0 then
+		return 0
+	end
+end
+
+function set_conf()
+	local get_sim_ifname = utl.trim(luci.sys.exec("uci get simcard." .. sim .. ".ifname"))
+	local get_sim_proto = utl.trim(luci.sys.exec("uci get simcard." .. sim .. ".proto"))
+	if sim == "sim1" then
+		if get_sim_proto == "3g" then
+			luci.sys.call("uci set network.wan.proto='none'")
+		end
+		if get_sim_proto == "ndis" then
+			luci.sys.call("uci set network.wan.proto='dhcp'")
+		end
+		luci.sys.call("uci set network.wan.ifname=" .. get_sim_ifname)
+		luci.sys.call("uci set network.ppp.enabled='1'")
+		luci.sys.exec("/etc/init.d/network restart")
+	elseif sim == "sim2" then
+		if get_sim_proto == "3g" then
+			luci.sys.call("uci set network.wan.proto='none'")
+		end
+		if get_sim_proto == "ndis" then
+			luci.sys.call("uci set network.wan.proto='dhcp'")
+		end
+		luci.sys.call("uci set network.wan.ifname=" .. get_sim_ifname)
+		luci.sys.call("uci set network.ppp.enabled='1'")
+		luci.sys.exec("/etc/init.d/network restart")
+	end
+end
+
+function recognize_wan()
+	if get_net_wan == "eth1" or get_net_wan == "wlan0" then
+		set_conf()
+		return 1
+	else
+		return 0
+	end
+end
+
+function gsm_state()
+	local gsm = utl.trim(luci.sys.exec("gsmctl -z"))
+
+	if gsm == "not inserted" then
+		return 1
+	elseif gsm == "inserted" then
+		return 0
+	else
+		return 1
+	end
+end
+
+function stop()
+	fn = io.open("/tmp/sim_idle_tmp", "r")
+	repeat
+		s = fn:read ("*l")
+		if s then
+			luci.sys.exec("uci set " .. s)
+		end
+	until not s
+	fn:close()
+	luci.sys.exec("rm /tmp/sim_idle_tmp")
+	luci.sys.exec("ifup wan")
+end
+
+if step == 1 then
+	start()
+	rv = {
+		test_start = "0",
+		simp = prim_sim
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+elseif step == 2 then
+	luci.sys.exec("sleep 1")
+	local x = recognize_wan()
+	if x == 1 then
+		rv = {
+			wan = "1"
+		}
+	elseif x == 0 then
+		rv = {
+			wan = "0"
+		}
+	end
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+elseif step == 3 then
+	luci.sys.exec("sleep 2")
+	local g_state = gsm_state()
+
+	--Maybe modem not started yet? Trying again.
+	if g_state == 1 then
+		luci.sys.exec("sleep 2")
+		g_state = gsm_state()
+	end
+
+	if g_state == 1 then
+		rv = {
+			state = "SIM not inserted"
+		}
+	elseif g_state == 0 then
+		rv = {
+			state = 0
+		}
+	end
+
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+elseif step == 4 then
+	luci.sys.exec("sleep 1")
+	local x = ping_host()
+	local wan_ip = utl.trim(luci.sys.exec(". /lib/functions/network.sh; network_get_ipaddr ip wan; echo $ip;")) or "-"
+	local imsi = utl.trim(luci.sys.exec("gsmctl -x"))
+	local iccid = utl.trim(luci.sys.exec("gsmctl -J"))
+
+	if x == 1 then
+		rv = {
+			pingg = "0",
+			ping_ans = 1,
+			ip = ping_ip,
+			wan_ip = wan_ip,
+			imsi = imsi,
+			iccid = iccid
+	}
+	elseif x == 0 then
+		rv = {
+			pingg = "0",
+			ping_ans = 0,
+			ip = ping_ip,
+			wan_ip = wan_ip,
+			imsi = imsi,
+			iccid = iccid
+		}
+	end
+
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+elseif step == 5 then
+	if sim == "sim1" then
+		to_sim2()
+		rv = {
+			simcard = "sim2"
+		}
+	elseif sim == "sim2" then
+		to_sim1()
+		rv = {
+			simcard = "sim1"
+		}
+	end
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	if mwmode == 1 then
+		luci.sys.exec("sleep 13")
+	else
+		luci.sys.exec("sleep 8")
+	end
+	return
+elseif step == 6 then
+	stop()
+	rv = {
+		test_finished = 0
+	}
+	luci.http.prepare_content("application/json")
+	luci.http.write_json(rv)
+	return
+end
+%>
+<%+header%>
+<script type="text/javascript">
+var settings = {
+	'sim_state' : {
+		'inserted' : {'value' : "Not inserted", 'color' : "rgb(64, 64, 64)"},
+		'not_inserted' : {'value' : "Not inserted", 'color' : "rgb(64, 64, 64)"}
+	},
+	'host' : {
+		'inserted' : { 'info' : "ip", 'color' : "rgb(64, 64, 64)" },
+		'not_inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)" }
+	},
+	'ping' : {
+		'inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)" },
+		'not_inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)"}
+	},
+	'wan' : {
+		'inserted' : { 'info' : "wan_ip", 'color' : "rgb(64, 64, 64)" },
+		'not_inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)"}
+	},
+	'imsi' : {
+		'inserted' : { 'info' : "imsi", 'color' : "rgb(64, 64, 64)" },
+		'not_inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)"}
+	},
+	'iccid' : {
+		'inserted' : { 'info' : "iccid", 'color' : "rgb(64, 64, 64)" },
+		'not_inserted' : { 'value' : "N/A", 'color' : "rgb(64, 64, 64)"}
+	}
+};
+
+function set_info(num, info){
+	var element, field;
+	var fields = ['host', 'wan', 'imsi', 'iccid'];
+
+	if (num){
+		for (i=0; i < fields.length; i++){
+			element = document.getElementById(fields[i] + num);
+			field = settings[fields[i]].inserted.info;
+			element.innerHTML = info[field];
+			element.style.color = settings[fields[i]].inserted.color;
+		}
+	}
+}
+
+function turn_on(){
+	var element = document.getElementById("test");
+
+	element.disabled = false;
+	element.style.color = '#404040';
+}
+
+function result_values(x){
+	var element
+	var fields = ['sim_state', 'host', 'ping', 'wan', 'imsi', 'iccid'];
+
+	if (x){
+		for (i=0; i < fields.length; i++){
+			element = document.getElementById(fields[i] + x);
+			console.log(fields[i]);
+			console.log(settings[fields[i]]);
+			console.log(settings[fields[i]].not_inserted.value);
+			element.innerHTML = settings[fields[i]].not_inserted.value;
+			element.style.color = settings[fields[i]].not_inserted.color;
+		}
+	}
+}
+
+function loading_pic(){
+	x = document.getElementsByClassName("results");
+
+	for(i = 0; i < x.length; i++){
+		x[i].innerHTML='<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px;" alt="Loading">';
+	}
+}
+function sim_idle_testing(){
+	loading_pic();
+	document.getElementById("test").disabled = true;
+	document.getElementById("test").style.color='#B8B8B8';
+	var spin_text = document.getElementById("spin_text")
+	var loading = document.getElementById("loading")
+
+	XHR.get('<%=REQUEST_URI%>', {step: 1},
+	function(x, info){
+		if(info.test_start == "0"){
+			message = document.getElementById("message");
+			message.innerHTML = '<div id="war_message" class="alert-message error"><%=translate("During test phase do not commit any action, wait for the test to finish")%></div>';
+			spin_text.innerHTML="Test started";
+			loading.style.display="inline";
+			loading.style.float="right";
+			if(info.simp == "sim1"){
+				document.getElementById("sim1").innerHTML="SIM1";
+				document.getElementById("sim2").innerHTML="SIM2";
+				document.getElementById("sim1").style.color="rgb(64,64,64)";
+				document.getElementById("sim2").style.color="rgb(64,64,64)";
+			}
+			if(info.simp == "sim2"){
+				document.getElementById("sim1").innerHTML="SIM2";
+				document.getElementById("sim2").innerHTML="SIM1";
+				document.getElementById("sim1").style.color="rgb(64,64,64)";
+				document.getElementById("sim2").style.color="rgb(64,64,64)";
+			}
+			XHR.get('<%=REQUEST_URI%>', {step: 2},
+			function(y, info){
+				if(info.wan == "1"){
+					spin_text.innerHTML="Setting up network configuration";
+					XHR.get('<%=REQUEST_URI%>', {step: 3},
+						function(s, info){
+							if(info.state == "SIM not inserted"){
+								result_values(1);
+								spin_text.innerHTML=info.state;
+								XHR.get('<%=REQUEST_URI%>', {step: 5},
+									function(ss, info){
+										if(info.simcard == "sim1"){
+											spin_text.innerHTML="Switching to sim1";
+												XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim1"},
+												function(s, info){
+													if(info.state == "SIM not inserted"){
+														result_values(2);
+
+														spin_text.innerHTML=info.state;
+														XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+														function(ss, info){
+															if(info.simcard == "sim2"){
+																spin_text.innerHTML="Switching back to sim2";
+																XHR.get('<%=REQUEST_URI%>',{step: 6},
+																function(e, info){
+																	if(info.test_finished == 0){
+																		spin_text.innerHTML="Test finished";
+																		setTimeout(function(){
+																		loading.style.display="none";
+																		message.innerHTML = '';
+																		turn_on();
+																		}, 4000);
+																	}
+																}
+																);
+															}
+														}
+														);
+													}
+													if(info.state == 0){
+														document.getElementById("sim_state2").innerHTML="OK (inserted)";
+														document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+														spin_text.innerHTML="SIM ready";
+														XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim1"},
+														function(p, info){
+															if(info.pingg == "0"){
+																set_info(2, info);
+																spin_text.innerHTML="Pinging host";
+																setTimeout(function(){
+																	if(info.ping_ans == 1){
+																		spin_text.innerHTML="Ping failed";
+																		document.getElementById("ping2").innerHTML="Failed";
+																		document.getElementById("ping2").style.color="rgb(64,64,64)";
+																	}
+																	if(info.ping_ans == 0){
+																		spin_text.innerHTML="Ping success";
+																		document.getElementById("ping2").innerHTML="Success";
+																		document.getElementById("ping2").style.color="rgb(64,64,64)";
+																	}
+																}, 4000);
+															XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+																function(ss, info){
+																	if(info.simcard == "sim2"){
+																		spin_text.innerHTML="Switching back to sim2";
+																		XHR.get('<%=REQUEST_URI%>', {step: 6},
+																		function(e, info){
+																			if(info.test_finished == 0){
+																				spin_text.innerHTML="Test finished";
+																				setTimeout(function(){
+																				loading.style.display="none";
+																				message.innerHTML = '';
+																				turn_on();
+																				}, 4000);
+																			}
+																		}
+																		);
+																	}
+																}
+															);
+															}
+														}
+														);
+													}
+												}
+												);
+										}
+										if(info.simcard == "sim2"){
+											spin_text.innerHTML="Switching to sim2";
+											XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim2"},
+											function(s, info){
+												if(info.state == "SIM not inserted"){
+													result_values(2);
+													spin_text.innerHTML=info.state;
+													XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+													function(ss, info){
+														if(info.simcard == "sim1"){
+															spin_text.innerHTML="Swtiching back to sim1";
+															XHR.get('<%=REQUEST_URI%>', {step: 6},
+															function(e, info){
+																if(info.test_finished == 0){
+																	spin_text.innerHTML="Test fisnished";
+																	setTimeout(function(){
+																	loading.style.display="none";
+																	message.innerHTML = '';
+																	turn_on();
+																	}, 4000);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+												if(info.state == 0){
+													spin_text.innerHTML="SIM ready";
+													document.getElementById("sim_state2").innerHTML="OK (inserted)";
+													document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+													XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim2"},
+													function(p, info){
+														if(info.pingg == "0"){
+															set_info(2, info);
+															spin_text.innerHTML="Pinging host";
+															setTimeout(function(){
+															if(info.ping_ans == 1){
+															spin_text.innerHTML="Ping failed";
+															document.getElementById("ping2").innerHTML="Failed";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															}
+															if(info.ping_ans == 0){
+															spin_text.innerHTML="Ping success";
+															document.getElementById("ping2").innerHTML="Success";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															}
+															}, 4000);
+															XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+															function(ss, info){
+																if(info.simcard == "sim1"){
+																	spin_text.innerHTML="Switching back to sim1";
+																	XHR.get('<%=REQUEST_URI%>', {step: 6},
+																	function(e, info){
+																		if(info.test_finished == 0){
+																			spin_text.innerHTML="Test finished";
+																			setTimeout(function(){
+																			loading.style.display="none";
+																			message.innerHTML = '';
+																			turn_on();
+																			}, 4000);
+																		}
+																	}
+																	);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+									}
+								);
+							}
+							else if(info.state == 0){
+								document.getElementById("sim_state1").innerHTML="OK (inserted)";
+								document.getElementById("sim_state1").style.color="rgb(64,64,64)";
+								spin_text.innerHTML="SIM ready";
+								XHR.get('<%=REQUEST_URI%>', {step: 4},
+								function(p, info){
+									if(info.pingg == "0"){
+										set_info(1, info);
+										spin_text.innerHTML="Pinging host";
+										setTimeout(function(){
+										if(info.ping_ans == 1){
+										spin_text.innerHTML="Ping failed";
+										document.getElementById("ping1").innerHTML="Failed";
+										document.getElementById("ping1").style.color="rgb(64,64,64)";
+										}
+										if(info.ping_ans == 0){
+										spin_text.innerHTML="Ping success";
+										document.getElementById("ping1").innerHTML="Success";
+										document.getElementById("ping1").style.color="rgb(64,64,64)";
+										}
+										}, 4000);
+										XHR.get('<%=REQUEST_URI%>', {step: 5},
+										function(ss, info){
+											if(info.simcard == "sim1"){
+												spin_text.innerHTML="Switching to sim1";
+												XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim1"},
+												function(s, info){
+													if(info.state == "SIM not inserted"){
+														result_values(2);
+														spin_text.innerHTML=info.state;
+														XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+														function(ss, info){
+															if(info.simcard == "sim2"){
+																spin_text.innerHTML="Switching back to sim2";
+																XHR.get('<%=REQUEST_URI%>', {step: 6},
+																function(e, info){
+																	if(info.test_finished == 0){
+																		spin_text.innerHTML="Test finished";
+																		setTimeout(function(){
+																		loading.style.display="none";
+																		message.innerHTML = '';
+																		turn_on();
+																		}, 4000);
+																	}
+																}
+																);
+															}
+														}
+														);
+													}
+													if(info.state == 0){
+														document.getElementById("sim_state2").innerHTML="OK (inserted)";
+														document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+														spin_text.innerHTML="SIM ready";
+														XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim1"},
+														function(p, info){
+															if(info.pingg == "0"){
+																set_info(2, info);
+																spin_text.innerHTML="Pinging host";
+																setTimeout(function(){
+																if(info.ping_ans == 1){
+																spin_text.innerHTML="Ping failed";
+																document.getElementById("ping2").innerHTML="Failed";
+																document.getElementById("ping2").style.color="rgb(64,64,64)";
+																}
+																if(info.ping_ans == 0){
+																spin_text.innerHTML="Ping success";
+																document.getElementById("ping2").innerHTML="Success";
+																document.getElementById("ping2").style.color="rgb(64,64,64)";
+																}
+																}, 4000);
+																XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+																function(ss, info){
+																	if(info.simcard == "sim2"){
+																		spin_text.innerHTML="Switching back to sim2";
+																		XHR.get('<%=REQUEST_URI%>', {step: 6},
+																		function(e, info){
+																			if(info.test_finished == 0){
+																				spin_text.innerHTML="Test finished";
+																				setTimeout(function(){loading.style.display="none";
+																				message.innerHTML = '';
+																				turn_on();
+																				}, 4000);
+																			}
+																		}
+																		);
+																	}
+																}
+																);
+															}
+														}
+														);
+													}
+												}
+												);
+											}
+											if(info.simcard == "sim2"){
+												spin_text.innerHTML="Switching to sim2";
+												XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim2"},
+												function(s, info){
+													if(info.state == "SIM not inserted"){
+														result_values(2);
+														spin_text.innerHTML=info.state;
+														XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+														function(ss, info){
+															if(info.simcard == "sim1"){
+																spin_text.innerHTML="Switching back to sim1";
+																XHR.get('<%=REQUEST_URI%>', {step: 6},
+																function(e, info){
+																	if(info.test_finished == 0){
+																		spin_text.innerHTML="Test finished";
+																		setTimeout(function(){loading.style.display="none";
+																		message.innerHTML = '';
+																		turn_on();
+																		}, 4000);
+																	}
+																}
+																);
+															}
+														}
+														);
+													}
+													if(info.state == 0){
+														spin_text.innerHTML="SIM ready";
+														document.getElementById("sim_state2").innerHTML="OK (inserted)";
+														document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+														XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim2"},
+														function(p, info){
+															if(info.pingg == "0"){
+																set_info(2, info);
+																spin_text.innerHTML="Pinging host";
+																setTimeout(function(){
+																if(info.ping_ans == 1){
+																spin_text.innerHTML="Ping failed";
+																document.getElementById("ping2").innerHTML="Failed";
+																document.getElementById("ping2").style.color="rgb(64,64,64)";
+																}
+																if(info.ping_ans == 0){
+																spin_text.innerHTML="Ping success";
+																document.getElementById("ping2").innerHTML="Success";
+																document.getElementById("ping2").style.color="rgb(64,64,64)";
+																}
+																}, 4000);
+																XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+																function(ss, info){
+																	if(info.simcard == "sim1"){
+																		spin_text.innerHTML="Switching back to sim1";
+																		XHR.get('<%=REQUEST_URI%>', {step: 6},
+																		function(e, info){
+																			if(info.test_finished == 0){
+																				spin_text.innerHTML="Test finished";
+																				setTimeout(function(){loading.style.display="none";
+																				message.innerHTML = '';
+																				turn_on();
+																				}, 4000);
+																			}
+																		}
+																		);
+																	}
+																}
+																);
+															}
+														}
+														);
+													}
+												}
+												);
+											}
+										}
+										);
+									}
+								}
+								);
+							}
+						}
+					);
+				}
+				else if(info.wan == "0"){
+					spin_text.innerHTML="Setting up network configuration";
+					XHR.get('<%=REQUEST_URI%>', {step: 3},
+					function(s, info){
+						if(info.state == "SIM not inserted"){
+							result_values(1);
+							spin_text.innerHTML=info.state;
+							XHR.get('<%=REQUEST_URI%>', {step: 5},
+							function(ss, info){
+								if(info.simcard == "sim1"){
+									spin_text.innerHTML="Switching to sim1";
+									XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim1"},
+									function(s, info){
+										if(info.state == "SIM not inserted"){
+											result_values(2);
+											spin_text.innerHTML=info.state;
+											XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+											function(ss, info){
+												if(info.simcard == "sim2"){
+													spin_text.innerHTML="Switching back to sim2";
+													XHR.get('<%=REQUEST_URI%>', {step: 6},
+													function(e, info){
+														if(info.test_finished == 0){
+															spin_text.innerHTML="Test finished";
+															setTimeout(function(){
+															loading.style.display="none";
+															message.innerHTML = '';
+															turn_on();
+															}, 4000);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+										if(info.state == 0){
+											document.getElementById("sim_state2").innerHTML="OK (inserted)";
+											document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+											spin_text.innerHTML="SIM ready";
+											XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim1"},
+											function(p, info){
+												if(info.pingg == "0"){
+													set_info(2, info);
+													spin_text.innerHTML="Pinging host";
+													setTimeout(function(){
+													if(info.ping_ans == 1){
+													document.getElementById("ping2").innerHTML="Failed";
+													document.getElementById("ping2").style.color="rgb(64,64,64)";
+													spin_text.innerHTML="Ping failed";
+													}
+													if(info.ping_ans == 0){
+													document.getElementById("ping2").innerHTML="Success";
+													document.getElementById("ping2").style.color="rgb(64,64,64)";
+													spin_text.innerHTML="Ping success";
+													}
+													}, 4000);
+													XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+													function(ss, info){
+														if(info.simcard == "sim2"){
+															spin_text.innerHTML="Switching back to sim2";
+															XHR.get('<%=REQUEST_URI%>', {step: 6},
+															function(e, info){
+																if(info.test_finished == 0){
+																	spin_text.innerHTML="Test finished";
+																	setTimeout(function(){
+																	loading.style.display="none";
+																	message.innerHTML = '';
+																	turn_on();
+																	}, 4000);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+									}
+									);
+								}
+								if(info.simcard == "sim2"){
+									spin_text.innerHTML="Switching to sim2";
+									XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim2"},
+									function(s, info){
+										if(info.state == "SIM not inserted"){
+											result_values(2);
+											spin_text.innerHTML=info.state;
+											XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+											function(ss, info){
+												if(info.simcard == "sim1"){
+													spin_text.innerHTML="Switching back to sim1";
+													XHR.get('<%=REQUEST_URI%>', {step: 6},
+													function(e, info){
+														if(info.test_finished == 0){
+															spin_text.innerHTML="Test finished";
+															setTimeout(function(){
+															loading.style.display="none";
+															message.innerHTML = '';
+															turn_on();
+															}, 4000);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+										if(info.state == 0){
+											spin_text.innerHTML="SIM ready";
+											document.getElementById("sim_state2").innerHTML="OK (inserted)";
+											document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+											XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim2"},
+											function(p, info){
+												if(info.pingg == "0"){
+													set_info(2, info);
+													spin_text.innerHTML="Pinging host";
+													setTimeout(function(){
+													if(info.ping_ans == 1){
+													document.getElementById("ping2").innerHTML="Failed";
+													document.getElementById("ping2").style.color="rgb(64,64,64)";
+													spin_text.innerHTML="Ping failed";
+													}
+													if(info.ping_ans == 0){
+													document.getElementById("ping2").innerHTML="Success";
+													document.getElementById("ping2").style.color="rgb(64,64,64)";
+													spin_text.innerHTML="Ping success";
+													}
+													}, 4000);
+													XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+													function(ss, info){
+														if(info.simcard == "sim1"){
+															spin_text.innerHTML="Switching back to sim1";
+															XHR.get('<%=REQUEST_URI%>', {step: 6},
+															function(e, info){
+																if(info.test_finished == 0){
+																	spin_text.innerHTML="Test finished";
+																	setTimeout(function(){
+																	loading.style.display="none";
+																	message.innerHTML = '';
+																	turn_on();
+																	}, 4000);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+									}
+									);
+								}
+							}
+							);
+						}
+						if(info.state == 0){
+							spin_text.innerHTML="SIM ready";
+							document.getElementById("sim_state1").innerHTML="OK (inserted)";
+							document.getElementById("sim_state1").style.color="rgb(64,64,64)";
+							XHR.get('<%=REQUEST_URI%>', {step: 4},
+							function(p, info){
+								if(info.pingg == "0"){
+									set_info(1, info);
+									spin_text.innerHTML="Pinging host";
+									setTimeout(function(){
+									if(info.ping_ans == 1){
+									document.getElementById("ping1").innerHTML="Failed";
+									document.getElementById("ping1").style.color="rgb(64,64,64)";
+									spin_text.innerHTML="Ping failed";
+									}
+									if(info.ping_ans == 0){
+									document.getElementById("ping1").innerHTML="Success";
+									document.getElementById("ping1").style.color="rgb(64,64,64)";
+									spin_text.innerHTML="Ping success";
+									}
+									}, 4000);
+									XHR.get('<%=REQUEST_URI%>', {step: 5},
+									function(ss, info){
+										if(info.simcard == "sim1"){
+											spin_text.innerHTML="Switching to sim1";
+											XHR.get('<%=REQUEST_URI%>', {step: 3, sim : "sim1"},
+											function(s, info){
+												if(info.state == "SIM not inserted"){
+													result_values(2);
+													spin_text.innerHTML=info.state;
+
+													XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+													function(ss, info){
+														if(info.simcard == "sim2"){
+															spin_text.innerHTML="Switching back to sim2";
+															XHR.get('<%=REQUEST_URI%>', {step: 6},
+															function(e, info){
+																if(info.test_finished == 0){
+																	spin_text.innerHTML="Test finished";
+																	setTimeout(function(){
+																	loading.style.display="none";
+																	message.innerHTML = '';
+																	turn_on();
+																	}, 4000);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+												if(info.state == 0){
+													spin_text.innerHTML="SIM ready";
+													document.getElementById("sim_state2").innerHTML="OK (inserted)";
+													document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+													XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim1"},
+													function(p, info){
+														if(info.pingg == "0"){
+															set_info(2, info);
+															spin_text.innerHTML="Pinging host";
+															setTimeout(function(){
+															if(info.ping_ans == 1){
+															document.getElementById("ping2").innerHTML="Failed";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															spin_text.innerHTML="Ping failed";
+															}
+															if(info.ping_ans == 0){
+															document.getElementById("ping2").innerHTML="Success";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															spin_text.innerHTML="Ping success";
+															}
+															}, 4000);
+															XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim1"},
+															function(ss, info){
+																if(info.simcard == "sim2"){
+																	spin_text.innerHTML="Switching back to sim2";
+																	XHR.get('<%=REQUEST_URI%>', {step: 6},
+																	function(e, info){
+																		if(info.test_finished == 0){
+																			spin_text.innerHTML="Test finished";
+																			setTimeout(function(){
+																			loading.style.display="none";
+																			message.innerHTML = '';
+																			turn_on();
+																			}, 4000);
+																		}
+																	}
+																	);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+										if(info.simcard == "sim2"){
+											spin_text.innerHTML="Switching to sim2";
+											XHR.get('<%=REQUEST_URI%>', {step: 3, sim: "sim2"},
+											function(s, info){
+												if(info.state == "SIM not inserted"){
+													result_values(2);
+													spin_text.innerHTML=info.state;
+													XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+													function(ss, info){
+														if(info.simcard == "sim1"){
+															spin_text.innerHTML="Switching back to sim1";
+															XHR.get('<%=REQUEST_URI%>', {step: 6},
+															function(e, info){
+																if(info.test_finished == 0){
+																	spin_text.innerHTML="Test finished";
+																	setTimeout(function(){
+																	loading.style.display="none";
+																	message.innerHTML = '';
+																	turn_on();
+																	}, 4000);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+												if(info.state == 0){
+													spin_text.innerHTML="SIM ready";
+													document.getElementById("sim_state2").innerHTML="OK (inserted)";
+													document.getElementById("sim_state2").style.color="rgb(64,64,64)";
+													XHR.get('<%=REQUEST_URI%>', {step: 4, sim: "sim2"},
+													function(p, info){
+														if(info.pingg == "0"){
+															set_info(2, info);
+															spin_text.innerHTML="Pinging host";
+															setTimeout(function(){
+															if(info.ping_ans == 1){
+															document.getElementById("ping2").innerHTML="Failed";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															spin_text.innerHTML="Ping failed";
+															}
+															if(info.ping_ans == 0){
+															document.getElementById("ping2").innerHTML="Success";
+															document.getElementById("ping2").style.color="rgb(64,64,64)";
+															spin_text.innerHTML="Ping success";
+															}
+															}, 4000);
+															XHR.get('<%=REQUEST_URI%>', {step: 5, sim: "sim2"},
+															function(ss, info){
+																if(info.simcard == "sim1"){
+																	spin_text.innerHTML="Swtiching back to sim1";
+																	XHR.get('<%=REQUEST_URI%>', {step: 6},
+																	function(e, info){
+																		if(info.test_finished == 0){
+																			spin_text.innerHTML="Test finished";
+																			setTimeout(function(){
+																			loading.style.display="none";
+																			message.innerHTML = '';
+																			turn_on();
+																			}, 4000);
+																		}
+																	}
+																	);
+																}
+															}
+															);
+														}
+													}
+													);
+												}
+											}
+											);
+										}
+									}
+									);
+								}
+
+							}
+							);
+						}
+					}
+					);
+				}
+			}
+			);
+		}
+	}
+	);
+}
+</script>
+<div class="cbi-map">
+<div id="message"></div>
+<div style="display: inline-block; width: 100%;">
+	<h2 style="display: inline;"><a id="content" name="content"><%=translate("SIM Idle Protection Test")%></a></h2>
+	<div id="loading" style="display: none;">
+		<span id="spin_text" style="position: relative; bottom: 12px;"></span>
+		<img src="/luci-static/resources/icons/loading.gif" alt="Loading">
+	</div>
+</div>
+<fieldset>
+	<input type="button" class="cbi-button" value="<%=translate('Test')%>" id="test" onclick="HideHint(this);sim_idle_testing()" onmouseout="HideHint(this)" onmouseover="ShowHint(this,'Test SIM IDLE Protection feature')">
+	<!--<div id="loading" style="display: none;">
+		<span id="spin_text" style="position: relative; bottom: 12px;"></span>
+		<img src="/luci-static/resources/icons/loading.gif" alt="Loading">
+	</div>--><br>
+	<table id="results" cellspacing="1" class="cbi-section-table" style="float: left;">
+		<tr class="cbi-section-table-row" style="height: 40px;">
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("SIM")%></b></span></td>
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("SIM state")%></b></span></td>
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("IMSI")%></b></span></td>
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("ICCID")%></b></span></td>
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("Host IP")%></b></span></td>
+			<td style="vertical-align: middle;"><span <="" style="color: rgb(64,64,64);"><b><%=translate("WAN ip")%></b></span></td>
+			<td style="vertical-align: middle;"><b><%=translate("Ping")%></b></span></td>
+
+		<tr class="cbi-section-table-row" style="height: 40px;">
+			<td id="sim1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="sim_state1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="imsi1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="iccid1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="host1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="wan1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="ping1" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+
+		<tr class="cbi-section-table-row" style="height: 40px;">
+			<td id="sim2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="sim_state2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="imsi2" class="results" style="vertical-align: middle; color: #B8B8B8; ">-</td>
+			<td id="iccid2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="host2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="wan2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+			<td id="ping2" class="results" style="vertical-align: middle; color: #B8B8B8;">-</td>
+	</table>
+</fieldset>
+</div>
+<%+footer%>

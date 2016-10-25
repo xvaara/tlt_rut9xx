@@ -1,0 +1,382 @@
+<%#
+LuCI - Lua Configuration Interface
+Copyright 2008 Steven Barth <steven@midlink.org>
+Copyright 2008-2011 Jo-Philipp Wich <xm@subsignal.org>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+$Id: index.htm 8408 2012-04-02 22:50:26Z jow $
+
+-%>
+
+<%
+	require("uci")
+	require "luci.fs"
+	require "luci.tools.status"
+	luci.util   = require "luci.util"
+	local ds = require "luci.dispatcher"
+	local uci = uci.cursor()
+ 	local function cecho(string)
+ 	
+	--luci.sys.call("echo \"" .. string .. "\" >> /tmp/log.log")
+	end
+	local sys = require "luci.sys"
+	local nw  = require "luci.model.network"
+	if luci.http.formvalue("status") == "1" then
+		local rv
+		rv = nw:get_services()
+		luci.http.prepare_content("application/json")
+		luci.http.write_json(rv)
+		return
+	end
+	local system, model = luci.sys.sysinfo()
+
+	local utl = require "luci.util"
+------------------------------------------------------
+------------------------------------------------------
+------------------------------------------------------
+
+	local system, model = luci.sys.sysinfo()
+	function go_to_case(name_service, on_off)
+		local service = "null"
+		local set_uci = ""
+		if name_service == "vrrp_lan" then
+			service = "vrrpd"
+			set_uci = "uci set vrrpd.vid1.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "vpn_server" or name_service == "vpn_client" then
+			service = "openvpn"
+			local srv_clt = "client"
+			if name_service == "vpn_server" then
+				srv_clt = "server"
+			end
+			uci:foreach("openvpn", "openvpn", function(s)
+				local enable = s.enable or "0"
+				local usr_enable = s.usr_enable or "0"
+				local name = s[".name"]:split("_")
+				if name[1] == srv_clt then
+					if enable == "1" and on_off == "0" then
+						os.execute("uci set openvpn." .. s[".name"] .. ".enable=" .. on_off)
+						os.execute("uci set openvpn." .. s[".name"] .. ".usr_enable=1")
+					elseif enable == "0" and on_off == "1" then
+						os.execute("uci set openvpn." .. s[".name"] .. ".enable=" .. on_off)
+						os.execute("uci delete openvpn." .. s[".name"] .. ".usr_enable=1")
+					end
+				end
+			end)
+			uci:commit("openvpn")
+		elseif name_service == "ip_sec" then
+			service = "ipsec"
+			uci:foreach("strongswan", "conn", function(s)
+				local enable = s.enabled or "0"
+				if enable == "1" and on_off == "0" then
+					uci:set("strongswan", s[".name"], "enabled", on_off)
+				elseif enable == "0" and on_off == "1" then
+					uci:set("strongswan", s[".name"], "enabled", on_off)
+				end
+			end)
+			
+			uci:commit("strongswan")
+		elseif name_service == "ipsec_keep" then
+			service = "strongswan"
+			set_uci = "uci set strongswan.keepalive.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "snmp_agent" then
+			service = "snmpd"
+			set_uci = "uci set snmpd.@agent[0].enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "snmp_trap" then
+			service = "snmpd"
+			set_uci = "uci set snmpd.@trap[0].trap_enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "ddns_service" then
+			service = "ddns"
+			uci:foreach("ddns", "service", function(s)
+				local enable = s.enabled or "0"
+				local usr_enable = s.usr_enable or "0"
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set ddns." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci set ddns." .. s[".name"] .. ".usr_enable=1")
+				elseif enable == "0" and on_off == "1" then
+					os.execute("uci set ddns." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci delete ddns." .. s[".name"] .. ".usr_enable=1")
+				end
+			end)
+			os.execute("uci commit")
+		elseif name_service == "gps_service" then
+			service = "gpsd"
+			set_uci = "uci set gps.gps.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "hotspot" then
+			service = "coovachilli"
+			set_uci = "uci set coovachilli.hotspot1.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "ntp_run" then
+			service = "sysntpd"
+			set_uci = "uci set ntpclient.@ntpclient[0].enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "ftp" then
+			service = "ftp_upload"
+			set_uci = "uci set coovachilli.ftp.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "ping_reboot" then
+			service = "ping_reboot"
+			uci:foreach("ping_reboot", "ping_reboot", function(s)
+				local enable = s.enable or "0"
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set ping_reboot." .. s[".name"] .. ".enable=" .. on_off)
+				elseif enable == "0" and on_off == "1" then
+					os.execute("uci set ping_reboot." .. s[".name"] .. ".enable=" .. on_off)
+				end
+			end)
+			os.execute("uci commit ping_reboot")
+		elseif name_service == "gre_tunnel" then
+			service = "gre-tunnel"
+			uci:foreach("gre_tunnel", "gre_tunnel", function(s)
+				local enable = s.enabled or "0"
+				local usr_enable = s.usr_enable or "0"
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set gre_tunnel." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci set gre_tunnel." .. s[".name"] .. ".usr_enable=1")
+				elseif enable == "0" and on_off == "1" then
+					os.execute("uci set gre_tunnel." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci delete gre_tunnel." .. s[".name"] .. ".usr_enable=1")
+				end
+			end)
+			os.execute("uci commit")
+		elseif name_service == "input_output" then
+			service = "ioman"
+			uci:foreach("ioman", "rule", function(s)
+				local enable = s.enabled or ""
+				local usr_enable = s.usr_enable or ""
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set ioman." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci set ioman." .. s[".name"] .. ".usr_enable=1")
+				elseif enable == "0" and on_off == "1" and usr_enable  == "1" then
+					os.execute("uci set ioman." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci delete ioman." .. s[".name"] .. ".usr_enable=1")
+				end
+			end)
+			os.execute("uci commit")
+		elseif name_service == "sms_utils" then
+			service = "sms-utils"
+			uci:foreach("sms_utils", "rule", function(s)
+				local enable = s.enabled or ""
+				local usr_enable = s.usr_enable or ""
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set sms_utils." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci set sms_utils." .. s[".name"] .. ".usr_enable=1")
+				elseif enable == "0" and on_off == "1" and usr_enable  == "1" then
+					os.execute("uci set sms_utils." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci delete sms_utils." .. s[".name"] .. ".usr_enable=1")
+				end
+			end)
+			os.execute("uci commit")
+		elseif name_service == "privoxy" then
+			service = "privoxy"
+			set_uci = "uci set privoxy.privoxy.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "hostblock" then
+			service = "hostblock"
+			set_uci = "uci set hostblock.config.enabled=\"" .. on_off .. "\"; uci commit"
+		elseif name_service == "qos" then
+			service = "qos"
+			uci:foreach("qos", "interface", function(s)
+				local enable = s.enabled or "0"
+				local usr_enable = s.usr_enable or "0"
+				if enable == "1" and on_off == "0" then
+					os.execute("uci set qos." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci set qos." .. s[".name"] .. ".usr_enable=1")
+				elseif enable == "0" and on_off == "1" then
+					os.execute("uci set qos." .. s[".name"] .. ".enabled=" .. on_off)
+					os.execute("uci delete qos." .. s[".name"] .. ".usr_enable=1")
+				end
+			end)
+			os.execute("uci commit")
+		else
+			service = "null"
+		end
+		if service ~= "null" then
+			if on_off == "0" or on_off == "1" then
+				os.execute(set_uci)
+			end
+
+			os.execute("/usr/sbin/checksv.sh " .. service .. " &>/dev/null")
+
+			if service == "sysntpd" then
+				--NTP CLIENT ON/OFF/RESTART
+				os.execute("export ACTION=ifdown; sh /etc/hotplug.d/iface/20-ntpclient >/dev/null")
+				os.execute("export ACTION=; sh /etc/hotplug.d/iface/20-ntpclient >/dev/null")
+			else
+				os.execute("/etc/init.d/" .. service .. " restart 2>/dev/null")
+			end
+		end
+	end
+	
+	if luci.http.formvalue("step") == "1" then
+		local service = luci.http.formvalue("the_service") or ""
+		local on_off = luci.http.formvalue("the_on_off") or ""
+		if service ~= "" and service ~= null and on_off ~= "" and on_off ~= null then
+			go_to_case(service, on_off)
+		end
+		local rv = {
+			notfing = "1"
+		}
+		luci.http.prepare_content("application/json")
+		luci.http.write_json(rv)
+		return
+	end
+	
+	
+
+%>
+<%+header%>
+<script type="text/javascript" src="<%=resource%>/cbi.js"></script>
+<script type="text/javascript">
+
+String.prototype.capitalize = function() {
+    return this.charAt(0).toUpperCase() + this.slice(1);
+}
+
+function add_refresh(id, status){
+	var a = document.getElementById(id + "_refresh");
+	if (a != null && a != undefined){
+		var text = "Restart";
+		if (status == "Disabled"){
+			text = "Restart".fontcolor("#a4a4a4");
+		}
+		a.innerHTML = '<td width="25%" ><a href="#" onclick="enable_refresh(\'' + id + '\', 2)"> ' + text + '</a></td>';
+	} 
+}
+
+function check(value, e, id){
+	if( value != null ){
+		var ref;
+		if( value >= 1 ){
+			e.innerHTML     = '<a  href="#" onclick="enable_refresh(\'' + id + '\', 0)">Enabled</a>';
+			add_refresh(id, "Enabled");
+		}else{
+			e.innerHTML     = '<a href="#" onclick="enable_refresh(\'' + id + '\', 1)"> ' + "Disabled".fontcolor("#a4a4a4") + ' </a>';
+			//--ADD Refresh button too
+			add_refresh(id, "Disabled");
+		}
+	}else{
+		e.innerHTML     = "N/A";
+	}
+}
+function refreshPage(){
+	document.getElementById("refresh").disabled = true;
+
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "service" )%>', { status: 1 },
+		function(x, info)
+		{
+			if (!info && x.responseText.search("UnikalusTekstinisStringasKitoTokioNiekurNera") != -1){
+				location.href=location.href;
+			}
+				if (e = document.getElementById('vrrp_lan'))
+					check(info[0][0], e, e.id);
+				if (e = document.getElementById('vpn_server'))
+					check(info[1][0], e, e.id);
+				if (e = document.getElementById('vpn_client'))
+					check(info[1][1], e, e.id);
+				if (e = document.getElementById('ip_sec'))
+					check(info[2][0], e, e.id);
+				if (e = document.getElementById('ipsec_keep'))
+					check(info[2][1], e, e.id);
+				if (e = document.getElementById('ntp_run'))
+					check(info[3][1], e, e.id);
+				if (e = document.getElementById('snmp_agent'))
+					check(info[4][0], e, e.id);
+				if (e = document.getElementById('snmp_trap'))
+					check(info[4][1], e, e.id);
+				if (e = document.getElementById('ddns_service'))
+					check(info[5][0], e, e.id);
+				if (e = document.getElementById('gps_service'))
+					check(info[6][0], e, e.id);
+				if (e = document.getElementById('hotspot'))
+					check(info[7][0], e, e.id);
+				if (e = document.getElementById('ftp'))
+					check(info[7][1], e, e.id);
+				if (e = document.getElementById('ping_reboot'))
+					check(info[8][0], e, e.id);
+				if (e = document.getElementById('gre_tunnel'))
+					check(info[9][0], e, e.id);
+				if (e = document.getElementById('input_output'))
+					check(info[10][0], e, e.id);
+				if (e = document.getElementById('sms_utils'))
+					check(info[11][0], e, e.id);
+				if (e = document.getElementById('privoxy'))
+					check(info[12][0], e, e.id);
+				if (e = document.getElementById('hostblock'))
+					check(info[12][1], e, e.id);
+				if (e = document.getElementById('qos'))
+					check(info[13][0], e, e.id);
+
+			document.getElementById('refresh').disabled = false;
+		}
+	);
+}
+
+function enable_refresh(id, on_off){
+	var e = document.getElementById(id);
+	var a = document.getElementById(id + "_refresh");
+	e.innerHTML  = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading"><%=translate(" Loading...")%>';
+	a.innerHTML  = '<img src="/luci-static/resources/icons/loading.gif" style="width: 10px; height: 10px" alt="Loading"><%=translate(" Loading...")%>';
+	XHR.get('<%=luci.dispatcher.build_url("admin", "status", "service")%>', { step: 1, the_service: id, the_on_off: on_off },
+	function(x, no){
+		if (no.notfing != null){
+			if (no.notfing == "5" ){
+				console.log("");
+			}
+		}
+		refreshPage();
+	}
+	);
+}
+AddWindowOnLoadEvent(refreshPage);
+</script>
+<%
+local gps = luci.util.trim(luci.sys.exec("uci get hwinfo.hwinfo.gps"))
+local in_out = luci.util.trim(luci.sys.exec("uci get hwinfo.hwinfo.in_out"))
+local show = luci.tools.status.show_mobile()
+%>
+<h2><a id="content" name="content"><%=translate("Services")%></a></h2>
+<fieldset class="cbi-section">
+	<div id="g3BarsShow" class="overlayParent">
+		<div class="overlayLegend" style="height: 18px;">
+			<div style="float: left;">
+				<%=translate("Services Status")%>
+			</div>
+			<div  style="float: right; margin-top: 2px; margin-right:10px;">
+
+			</div>
+		</div>
+<table class="cbi-section-table">
+	<table id="Vrrp" width="48%" cellspacing="10" class="cbi-section-table" style="float:left;width: 48%">
+		<tr class="cbi-section-table-row"><td width="50%"><a href="<%=ds.build_url('/admin/services/vrrp')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if VRRP (Virtual Router Redundancy Protocol) is enabled for LAN (Local Area Network)')%>')" onmouseout="HideHint(this)"><%=translate("VRRP LAN")%></span></a></td>		<td id="vrrp_lan" width="25%"> <%: - %></td><td id="vrrp_lan_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/vpn')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if there is at least one OpenVPN server created and enabled')%>')" onmouseout="HideHint(this)"><%=translate("OpenVPN servers")%></span></a></td>				<td id="vpn_server" width="25%"><%: - %></td><td id="vpn_server_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/vpn')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if there is at least one OpenVPN client created and enabled')%>')" onmouseout="HideHint(this)"><%=translate("OpenVPN clients")%></span></a></td>				<td id="vpn_client" width="25%"><%: - %></td><td id="vpn_client_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/snmp')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if SNMP (Simple Network Managment Protocol) agent functionality is enabled')%>')" onmouseout="HideHint(this)"><%=translate("SNMP agent")%></span></a></td>			<td id="snmp_agent" width="25%"><%: - %></td><td id="snmp_agent_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/snmp')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if SNMP (Simple Network Managment Protocol) trap functionality is enabled')%>')" onmouseout="HideHint(this)"><%=translate("SNMP trap")%></span></a></td>			<td id="snmp_trap" width="25%"><%: - %></td><td id="snmp_trap_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/ntpc')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if NTP (Network Time Protocol) client runs on stratup to synchronize time')%>')" onmouseout="HideHint(this)"><%=translate("NTP client")%></span></a></td>			<td id="ntp_run" width="25%"><%: - %></td><td id="ntp_run_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/vpn/ipsec/')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if IPsec (Internet Protocol Security) is used to secure IP (Internet Protocol) communications')%>')" onmouseout="HideHint(this)"><%=translate("IPsec")%></span></a></td>	<td id="ip_sec" width="25%"><%: - %></td><td id="ip_sec_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/auto-reboot')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if ping reboot feature is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Ping reboot")%></span></a></td>							<td id="ping_reboot" width="25%"><%: - %></td><td id="ping_reboot_refresh"><%: - %></td></tr>
+		<% if in_out == "1" then %>
+			<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/input-output')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if there is at least one rule enabled in Input/Output configuration')%>')" onmouseout="HideHint(this)"><%=translate("Input/Output rules")%></span></a></td>	<td id="input_output" width="25%"><%: - %></td><td id="input_output_refresh"><%: - %></td></tr>
+		<% end %>
+
+		</table>
+	<table id="Vrrp" width="48%" cellspacing="10" class="cbi-section-table" style="float:right;width: 48%">
+		<tr class="cbi-section-table-row"><td width="50%"><a href="<%=ds.build_url('/admin/services/ddns')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if there is at least one DDNS (Dynamic Domain Name System) configuration enabled')%>')" onmouseout="HideHint(this)"><%=translate("DDNS")%></span></a></td>	<td id="ddns_service" width="25%"><%: - %></td><td id="ddns_service_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/webfilter')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if host name based websites blocking is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Site blocking")%></span></a></td>			<td id="hostblock" width="25%"><%: - %></td><td id="hostblock_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/webfilter/proxy/')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if proxy server based URL content blocking is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Content blocker")%></span></a></td>			<td id="privoxy" width="25%"><%: - %></td><td id="privoxy_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/sms')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if there is at least one rule enabled in SMS Utilities configuration')%>')" onmouseout="HideHint(this)"><%=translate("SMS utils rules")%></span></a></td>	<td id="sms_utils" width="25%"><%: - %></td><td id="sms_utils_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/hotspot/')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if hotspot functionality is enabled on the router')%>')" onmouseout="HideHint(this)"><%=translate("Hotspot")%></span></a></td>				<td id="hotspot" width="25%"><%: - %></td><td id="hotspot_refresh"><%: - %></td>	</tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/hotspot/loging/')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if wireless traffic logging is enabled')%>')" onmouseout="HideHint(this)"><%=translate("Hotspot logging")%></span></a></td>				<td id="ftp" width="25%"><%: - %></td><td id="ftp_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/vpn/gre-tunnel/')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if GRE (Generic Routing Encapsulation) tunneling is enabled')%>')" onmouseout="HideHint(this)"><%=translate("GRE tunnel")%></span></a></td>		<td id="gre_tunnel" width="25%"><%: - %></td><td id="gre_tunnel_refresh"><%: - %></td></tr>
+		<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/qos')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if QoS feature is enabled')%>')" onmouseout="HideHint(this)" ><%=translate("QoS")%></span></a></td><td id="qos" width="25%"><%: - %></td>			<td id="qos_refresh"><%: - %></td></tr>
+		<% if gps == "1" and show then %>
+			<tr class="cbi-section-table-row"><td width="25%"><a href="<%=ds.build_url('/admin/services/gps/settings')%>" style="color: #404040;"><span onmouseover="ShowHint(this, '<%=translate('Specifies if GPS (Global Positioning System) service is enabled and your location coordinates are being generated')%>')" onmouseout="HideHint(this)"><%=translate("GPS")%></span></a></td>		<td id="gps_service" width="25%"><%: - %></td><td id="gps_service_refresh"><%: - %></td></tr>
+		<% end %>
+	</table>
+</table>
+</fieldset>
+<fieldset class="cbi-section">
+      <button id="refresh" class="cbi-button-refresh"  style="float: right;" disabled onClick="refreshPage();"><%=translate("Refresh")%></button>
+</fieldset>
+<%+footer%>

@@ -1,0 +1,88 @@
+<%
+	local sys = require "luci.sys"
+	local utl = require "luci.util"
+	local gpsfile = utl.trim(sys.exec("gpsctl -ixf"))
+	if gpsfile ~= "gpsctl: Connection refused" and gpsfile ~= nil and gpsfile ~= "" then
+		allgps = tostring(gpsfile)
+		local myTable = allgps:split("\n")
+
+		if myTable[1] ~= nil then
+			lat = myTable[1];
+		else
+			lat = "N/A"
+		end
+
+		if myTable[2] ~= nil then
+			lon = myTable[2];
+		else
+			lon = "N/A"
+		end
+
+		if myTable[3] ~= nil and myTable[3] ~= '0' then
+			fix_time = myTable[3]/1000;
+			fix_time =os.date("%Y-%m-%d, %H:%M:%S", fix_time)
+		else
+			fix_time = "N/A"
+		end
+	else
+		lat = "N/A"
+		lon = "N/A"
+		fix_time = "N/A"
+	end
+-%>
+
+<%+header%>
+
+<h2 style="margin-bottom: 0px;"><a id="content" name="content" ><%=translate("GPS")%></a></h2>
+
+<fieldset class="cbi-section">
+	<legend><%=translate("MAP")%></legend>
+	<div id="Map" style="height:350px; width:600px;align:left;float:left;border-style: solid; border-color: #e5e5e5;"></div>
+	<div id="cord" style="width:300px;align:left;float:left;">
+		<table width="100%" cellspacing="10">
+			<tr>
+				<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Specifies cordinate of latitude')%>')"</span><%=translate("Latitude")%></th>
+				<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Specifies cordinate of longitude')%>')"</span><%=translate("Longitude")%></th>
+				<th><span onmouseout="HideHint(this)" onmouseover="ShowHint(this, '<%=translate('Specifies fixed time')%>')"</span><%=translate("Fix time")%></th>
+			</tr>
+			<tr>
+				<td id="lat"><%: - %></td><td id="lon"><%: - %></td><td id="fix_time"><%: - %></td>
+			</tr>
+		</table>
+	</div>
+
+</fieldset>
+
+<%+footer%>
+
+<script src="/luci-static/teltonikaExp/OpenLayers.js"></script>
+<script>
+
+	var lat = <%=luci.http.write_json(lat)%>;
+	var lon = <%=luci.http.write_json(lon)%>;
+	var fix_time = <%=luci.http.write_json(fix_time)%>;
+
+	if (e = document.getElementById('lat'))
+		(lat) ? e.innerHTML = lat : e.innerHTML     = "N/A";
+	if (e = document.getElementById('lon'))
+		(lon) ? e.innerHTML = lon : e.innerHTML     = "N/A";
+	if (e = document.getElementById('fix_time'))
+		(fix_time) ? e.innerHTML = fix_time : e.innerHTML     = "N/A";
+
+	var zoom = 11;
+	var fromProjection	= new OpenLayers.Projection("EPSG:4326");	// Transform from WGS 1984
+	var toProjection	= new OpenLayers.Projection("EPSG:900913");	// to Spherical Mercator Projection
+	var position		= new OpenLayers.LonLat( lon, lat).transform( fromProjection, toProjection);
+
+	map = new OpenLayers.Map("Map");
+	var mapnik = new OpenLayers.Layer.OSM();
+	map.addLayer(mapnik);
+	map.addControl(new OpenLayers.Control.PanZoomBar());
+
+	var markers = new OpenLayers.Layer.Markers( "Markers" );
+	map.addLayer(markers);
+	markers.addMarker(new OpenLayers.Marker(position));
+
+	map.setCenter(position, zoom);
+	
+</script>

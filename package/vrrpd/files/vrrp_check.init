@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2012 OpenWrt.org
+
+START=99
+STOP=50
+
+PID_FILE=/var/run/vr_check.pid
+start() {
+	[ -e $PID_FILE ] || /usr/sbin/vrrp_check.sh &
+}
+
+stop() {
+	if [ -e $PID_FILE ]
+	then
+		local PID=`cat $PID_FILE`
+		kill -9 $PID
+		rm $PID_FILE
+	fi
+}
+
+restart() {
+	stop
+	start
+}
+
+restart() {
+	stop
+	start
+}

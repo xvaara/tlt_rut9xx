@@ -1,0 +1,96 @@
+#!/bin/sh
+. /lib/functions.sh
+
+product='148e/a000/222'
+product_ejected='148e/99a/222'
+WIMAX_TMP="/tmp/run/wimax"
+default_port=8080
+
+get_all_dest_ports() {
+	local config="$1"
+	# run commands for every interface section
+	local src_interface
+	local src_port
+	config_get src_port "$config" src_dport
+	config_get src_interface "$config" src
+	if [ "$src_interface" = "lan" ]; then
+		port_array="$port_array $src_port"
+	fi
+}
+
+if [ "${ACTION}" = "add" ]; then
+	if [ "${PRODUCT}" = "$product" ]; then
+		i=1
+		while [ $i -le 10 ]
+		do
+			if [ -e /dev/sr0 ]; then
+				eject /dev/sr0 >/tmp/zzzz
+				i=`expr $i + 10`
+			else
+				sleep 1
+				i=`expr $i + 1`
+			fi
+		done
+	elif [ "${PRODUCT}" = "$product_ejected" ]; then
+		if [ ! -f $WIMAX_TMP ];
+		then
+			/usr/bin/eventslog -i -t EVENTS -n "Plug" -e "WiMAX USB modem connected"
+		fi
+		touch "$WIMAX_TMP"
+		FIRST_PLUGIN=`uci -q get network.wan4`
+		if [ -z "$FIRST_PLUGIN" ]; then
+			sleep 1
+			uci -q set network.wan4="interface"
+			uci -q set network.wan4.ifname="usb0"
+			uci -q set network.wan4.proto="dhcp"
+			uci -q set network.wan4.disabled="1"
+			uci -q set network.wan4.enabled="0"
+			uci commit network
+			uci -q set multiwan.wan4="interface"
+			uci -q set multiwan.wan4.timeout="3"
+			uci -q set multiwan.wan4.health_recovery_retries="3"
+			uci -q set multiwan.wan4.health_fail_retries="3"
+			uci -q set multiwan.wan4.dns="auto"
+			uci -q set multiwan.wan4.health_interval="5"
+			uci -q set multiwan.wan4.icmp_hosts="8.8.8.8"
+			uci -q set multiwan.wan4.priority="100"
+			uci commit multiwan
+			
+			config_load firewall
+			config_foreach get_all_dest_ports redirect
+			if [ -n "${port_array}" ]; then
+				port_array_sorted=`echo "${port_array}"|tr " " "\n"|sort|tr "\n" " "`
+				for port in $port_array_sorted
+				do
+					if [ "$port" = "$default_port" ]; then
+						default_port=`expr $default_port + 1`
+					fi
+				done
+			fi
+			uci -q set firewall.E_WIMAX_WEBUI="redirect"
+			uci -q set firewall.E_WIMAX_WEBUI.target="DNAT"
+			uci -q set firewall.E_WIMAX_WEBUI.proto="tcp"
+			uci -q set firewall.E_WIMAX_WEBUI.src_dport="$default_port"
+			uci -q set firewall.E_WIMAX_WEBUI.dest_ip="192.168.0.1"
+			uci -q set firewall.E_WIMAX_WEBUI.dest_port="80"
+			uci -q set firewall.E_WIMAX_WEBUI.name="Enable_WiMAX_WEBUI"
+			uci -q set firewall.E_WIMAX_WEBUI.src="lan"
+			uci -q set firewall.E_WIMAX_WEBUI.dest="wan"
+			logger -t wimax "New uci configuration section added"
+		fi
+		uci -q delete firewall.E_WIMAX_WEBUI.enabled="0"
+		uci commit firewall
+		/etc/init.d/firewall reload
+	fi
+elif [ "${ACTION}" = "remove" ]; then
+	if [ "${PRODUCT}" = "$product_ejected" ]; then
+		if [ -f $WIMAX_TMP ];
+		then
+			/usr/bin/eventslog -i -t EVENTS -n "Unplug" -e "WiMAX USB modem disconnected"
+		fi
+		rm -rf "$WIMAX_TMP"
+		uci -q set firewall.E_WIMAX_WEBUI.enabled="0"
+		uci commit firewall
+		/etc/init.d/firewall reload
+	fi
+fi

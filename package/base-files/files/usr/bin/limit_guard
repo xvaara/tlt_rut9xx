@@ -1,0 +1,632 @@
+#!/usr/bin/env lua
+
+local sqlite = require "lsqlite3"
+require("uci")
+
+local uci = uci.cursor()
+
+local intervalDefault = 20 -- default interval value in seconds
+local daemon = "limit_guard" -- name of this script
+local counter = "mdcollectd" -- name of counter script
+local pidPath = "/var/run/" -- prefix for PID file
+local pidName = daemon ..".pid" -- PID filename
+local counter_pidName = counter ..".pid" -- PID filename
+local pidFullPath = pidPath .. pidName -- full path of PID filename
+local getPID = "pgrep -o -f ".. daemon -- command to get the PID of this script
+local getIface = "uci -q get system.module.iface" -- modem interface name
+local sysPath = "/sys/class/net/" -- place where kernel info is stored
+
+local dbPath = "/var/" -- place for running database
+local dbName = counter ..".db" -- database file name
+local dbFullPath = dbPath .. dbName
+
+local first_start = true
+local tables = {days = "days", current = "current", guard = "guard", sms = "sms"}
+local debug_on = uci:get("data_limit", "limit", "debug_mode") or 0
+local db
+
+--Config variables
+
+function debug(daemon,msg)
+	if debug_on == "1" then
+		os.execute("logger -t "..daemon.." -s \"" ..msg.. "\"")
+	end
+end
+
+function getParam(string)
+	local h = io.popen(string)
+	local t = h:read()
+	h:close()
+	return t
+end
+
+function get_sim()
+	local sim = getParam("/sbin/gpio.sh get SIM")
+	return sim
+end
+
+local sim = get_sim()
+
+debug(daemon, "Reading sim: " ..sim.. " config variables.")
+
+
+if sim == "0" then
+	----Data connection limit, config variables
+	enb_conn = uci:get("data_limit", "limit", "sec_enb_conn")
+	conn_start_hour = uci:get("data_limit", "limit", "sec_conn_hour")
+	conn_start_weekday = uci:get("data_limit", "limit", "sec_conn_weekday")
+	conn_start_day = uci:get("data_limit", "limit", "sec_conn_day")
+	conn_limit =  tonumber(uci:get("data_limit", "limit", "sec_conn_limit")) or 0
+	conn_period = uci:get("data_limit", "limit", "sec_conn_period")
+	----SMS warrning config variables
+	enb_wrn = uci:get("data_limit", "limit", "sec_enb_wrn")
+	wrn_limit =  tonumber(uci:get("data_limit", "limit", "sec_wrn_limit")) or 0
+	wrn_period = uci:get("data_limit", "limit", "sec_wrn_period")
+	wrn_start_day = uci:get("data_limit", "limit", "sec_wrn_day")
+	wrn_start_hour = uci:get("data_limit", "limit", "sec_wrn_hour")
+	wrn_start_weekday = uci:get("data_limit", "limit", "sec_wrn_weekday")
+	wrn_number = uci:get("data_limit", "limit", "sec_wrn_number")
+	
+else
+	----Data connection limit, config variables
+	enb_conn = uci:get("data_limit", "limit", "prim_enb_conn")
+	conn_start_hour = uci:get("data_limit", "limit", "prim_conn_hour")
+	conn_start_weekday = uci:get("data_limit", "limit", "prim_conn_weekday")
+	conn_start_day = uci:get("data_limit", "limit", "prim_conn_day")
+	conn_limit =  tonumber(uci:get("data_limit", "limit", "prim_conn_limit")) or 0
+	conn_period = uci:get("data_limit", "limit", "prim_conn_period")
+	----SMS warrning config variables
+	enb_wrn = uci:get("data_limit", "limit", "prim_enb_wrn")
+	wrn_limit =  tonumber(uci:get("data_limit", "limit", "prim_wrn_limit")) or 0
+	wrn_period = uci:get("data_limit", "limit", "prim_wrn_period")
+	wrn_start_day = uci:get("data_limit", "limit", "prim_wrn_day")
+	wrn_start_hour = uci:get("data_limit", "limit", "prim_wrn_hour")
+	wrn_start_weekday = uci:get("data_limit", "limit", "prim_wrn_weekday")
+	wrn_number = uci:get("data_limit", "limit", "prim_wrn_number")
+end
+
+------------------------------------------------
+----DB functions--------------------------------
+------------------------------------------------
+
+function initDB(dbPath, dbName, dbFullPath)
+	if fileExists(dbPath, dbName) then
+		local status
+		local query
+		db = sqlite.open(dbFullPath)
+		query = "SELECT name FROM sqlite_master WHERE type='table' AND name='%s'"
+		status = selectDB(string.format(query, tables.guard))
+		if not status or #status == 0 then
+			debug(daemon, "Creating guard table")
+			db:exec(string.format("CREATE TABLE %s (sim INT, time TIMESTAMP, lmt INT)", tables.guard))
+		end
+
+		status = selectDB(string.format(query, tables.sms))
+		if not status or #status == 0 then
+			debug(daemon, "Creating sms table")
+			db:exec(string.format("CREATE TABLE %s (sim INT, time TIMESTAMP, number VARCHAR(50), lmt INT)", tables.sms))
+		end
+	else
+		debug(daemon, "No database: " ..dbFullPath)
+		return false
+	end
+end
+
+function selectDB(query)
+	local list = {}
+	local stmt = db:prepare(query)
+
+	if stmt then
+		for row in db:nrows(query) do
+			list[#list+1] = row
+		end
+	else
+		debug(daemon, "Error: could not execute select table in database.")
+	end
+
+	if #list > 0 then
+		return list
+	end
+end
+
+function closeDB()
+	db:close()
+end
+
+function insert_sms_DB(data)
+	local query = string.format("INSERT INTO %s VALUES (:sim, :time, :number, :lmt)", data.table)
+	local stmt = db:prepare(query)
+
+	if stmt then
+		stmt:bind_names{ sim = data.sim, time = data.time, number = data.number, lmt = data.lmt }
+		stmt:step()
+		stmt:finalize()
+	else
+		debug(daemon, daemon.. " error: could not insert into sms database.")
+	end
+end
+
+----------------------------------------------
+--Base64 encoding functions-------------------
+----------------------------------------------
+
+function lsh(value,shift)
+	return math.mod((value*(2^shift)), 256)
+end
+
+-- shift right
+function rsh(value,shift)
+	return math.mod(math.floor(value/2^shift), 256)
+end
+
+-- return single bit (for OR)
+function bit(x,b)
+	return (math.mod(x, 2^b) - math.mod(x, 2^(b-1)) > 0)
+end
+
+-- logic OR for number values
+function lor(x,y)
+	result = 0
+	for p=1,8 do result = result + (((bit(x,p) or bit(y,p)) == true) and 2^(p-1) or 0) end
+	return result
+end
+
+-- encryption table
+local base64chars = {[0]='A',[1]='B',[2]='C',[3]='D',[4]='E',[5]='F',[6]='G',[7]='H',[8]='I',[9]='J',[10]='K',[11]='L',[12]='M',[13]='N',[14]='O',[15]='P',[16]='Q',[17]='R',[18]='S',[19]='T',[20]='U',[21]='V',[22]='W',[23]='X',[24]='Y',[25]='Z',[26]='a',[27]='b',[28]='c',[29]='d',[30]='e',[31]='f',[32]='g',[33]='h',[34]='i',[35]='j',[36]='k',[37]='l',[38]='m',[39]='n',[40]='o',[41]='p',[42]='q',[43]='r',[44]='s',[45]='t',[46]='u',[47]='v',[48]='w',[49]='x',[50]='y',[51]='z',[52]='0',[53]='1',[54]='2',[55]='3',[56]='4',[57]='5',[58]='6',[59]='7',[60]='8',[61]='9',[62]='-',[63]='_'}
+
+-- encode function 
+-- encodes input string to base64.
+function enc(data)
+	data = ("%s\0"):format(data)
+	local bytes = {}
+	local gl = data:len()
+	local result = ""
+	for spos=0,data:len(data)-1,3 do
+		for byte=1,3 do bytes[byte] = data:sub((spos+byte)):byte() or 0 end
+		result = ("%s%s%s%s%s"):format(
+			result,
+			base64chars[rsh(bytes[1],2)],
+			base64chars[lor(lsh((math.mod(bytes[1], 4)),4), rsh(bytes[2],4))] or "=",
+			((data:len()-spos) > 1) and base64chars[lor(lsh(
+				math.mod(bytes[2], 16)
+			,2), rsh(bytes[3],6))] or "=",
+			((data:len(data)-spos) > 2) and base64chars[(math.mod(bytes[3], 64))] or "="
+		)
+	end
+	return result
+end
+
+
+--------------------------
+
+--------------------------
+
+function round(num, idp)
+	local mult = 10^(idp or 0)
+	return math.floor(num * mult + 0.5) / mult
+end
+
+function fileExists(path, name)
+	local string = "ls ".. path
+	local h = io.popen(string)
+	local t = h:read("*all")
+	h:close()
+
+	for i in string.gmatch(t, "%S+") do
+		if i == name then
+			return 1
+		end
+	end
+end
+
+
+function sleep(n)
+	os.execute("sleep " .. tonumber(n))
+end
+
+function readFile(file)
+	local string = "cat ".. file
+	local h = io.popen(string)
+	local t = h:read()
+	h:close()
+	return tonumber(t)
+end
+
+-----------------------
+--------------------------
+
+--
+-- Main functions
+--
+
+function interface_exist(ifname)
+	local command = "ip link show  up | grep " ..ifname
+	local f = io.popen(command)
+	local l = f:read("*l")
+	if l then
+		f:close()
+		return 1
+	end
+	f:close()
+end
+
+function time_interval(period, data)
+	debug(daemon, "Calculating time interval...")
+	debug(daemon, "Period is: " ..period)
+	local seconds 
+	local timestamp = os.time()
+	local year, month, weekday, day, hour = os.date("%Y", timestamp), os.date("%m", timestamp), os.date("%w", timestamp), os.date("%d", timestamp), tonumber(os.date("%H", timestamp))
+	if period == "month" then
+		day = data.start_day
+		hour = 0
+		seconds = 2628000
+	elseif period == "week" then
+		if weekday ~= data.start_weekday then
+			if data.start_weekday > weekday then
+				day = day + data.start_weekday - weekday
+			else 
+				day = day - (weekday - data.start_weekday)
+			end
+		end
+		hour = 0
+		seconds = 604800
+	elseif period == "day" then
+		hour = data.start_hour
+		seconds = 86400
+	end
+	local start = tonumber(os.time{year=year, month=month, day=day, hour=hour})
+	debug(daemon, "Start time: (" ..os.date("%c", start).."), (" ..start.. "), End time: (" ..os.date("%c", start + seconds).. "), (" .. start + seconds.. ")")
+	return {start = start, end_time = start + seconds}
+end
+
+function get_data(period, timeInterval, sim_card)
+	
+	local data 
+	local table
+	
+	if period == "month" then
+		table = tables.days
+	elseif period =="week" then
+		table = tables.days
+	elseif period == "day" then
+		table = tables.current
+	end
+	debug(daemon, "Geting data from table " ..table)
+	local query = string.format("SELECT SUM(rx) as rx, SUM(tx) as tx FROM %s WHERE time>='%d' AND time<='%d' AND sim='%s'", table, timeInterval.start, timeInterval.end_time, sim_card)
+
+	local result = selectDB(query)
+	
+	if result[1].tx and result[1].rx then
+		data = round(((result[1].tx + result[1].rx) / (1024 * 1024)), 3)
+	else
+		data = 0
+	end
+
+	return data
+end
+
+function insert_guard_DB(data)
+	debug(daemon, "Writing guard table data")
+	local query = string.format("INSERT INTO %s VALUES (:sim, :time, :lmt)", data.table)
+	local stmt = db:prepare(query)
+	if stmt then
+		stmt:bind_names{ sim = data.sim, time = data.time,  lmt = data.lmt }
+		stmt:step()
+		stmt:finalize()
+	else
+		debug(daemon, "error: could not insert into guard database.")
+	end
+end
+
+function sms_send(msg, num, limit)
+	local file = "/tmp/.smstext" 
+	if num and msg then
+		debug(daemon, "Message run")
+		local cod = enc(msg)
+		os.execute("echo \""..cod.." \" > "..file)
+		sleep(2)
+		local responce = io.popen("gsmctl -S -b "..num, "r")
+		local l = responce:read("*l")
+		if l == "OK" then
+			data = { table = tables.sms, time = os.time(),  number = num, lmt = limit, sim = sim}
+			insert_sms_DB(data)
+			debug(daemon, "sms sent: "..l)
+		end
+		--os.remove(file)
+	end
+	return
+end
+
+function down_connection(limit, writ)
+	debug(daemon, "Interface down")
+	local iface = getParam(getIface)
+	if interface_exist(iface) then
+		uci:set("network", "ppp", "enabled", "0")
+		uci:set("network", "ppp", "overlimit", "1")
+		uci:save("network")
+		uci:commit("network")
+		debug(daemon, "Interface: "..iface)
+		if iface == "eth2" then
+			os.execute("ifdown ppp")
+			os.execute("ifdown wan")
+		else
+			os.execute("ifdown ppp")
+		end
+		if writ then
+			data = { table = tables.guard, sim = sim,  time = os.time(), lmt = limit}
+			insert_guard_DB(data)
+		end
+	else
+		debug(daemon, iface.." is already down.")
+	end
+end
+
+function legalize_it()
+	debug(daemon, "Interface up")
+	local iface = getParam(getIface)
+	if uci:get("network", "ppp", "overlimit") == "1" then
+		uci:set("network", "ppp", "enabled", "1")
+		uci:set("network", "ppp", "overlimit", "0")
+		uci:save("network")
+		uci:commit("network")
+	end
+	if not interface_exist(iface) then
+		--debug(daemon, "Interface "..iface)
+		if iface == "eth2" then
+			os.execute("ifup wan")
+			sleep(4)
+			os.execute("ifup ppp")
+		else
+			os.execute("ifup ppp")	
+		end
+	else
+		debug(daemon, iface.." is already up.")
+	end
+end
+
+function start()
+	if fileExists(pidPath, pidName) then
+		debug(daemon, daemon.. " is already started or " .. pidFullPath.. " is present.")
+	elseif enb_conn ~= "1" and enb_wrn ~= "1" then
+		debug(daemon, daemon.. " is disabled")
+		if fileExists(pidPath, pidName) then
+			os.remove(pidFullPath)
+		end
+		os.exit()
+	else
+		sleep(1)
+		local pid = tonumber(getParam(getPID))
+		local interval = intervalDefault -- interval in seconds
+		-- Create a file with PID in it
+		debug(daemon, "Writing pid: " ..pid.. ", to ".. pidFullPath)
+		os.execute(string.format("echo %d > %s", pid, pidFullPath))
+		debug(daemon, "Starting...")
+		local legalized = false
+		while 1 do			
+			if fileExists(pidPath, counter_pidName) then
+				if fileExists(dbPath, dbName)then
+					initDB(dbPath, dbName, dbFullPath)
+					local query_days = "SELECT * FROM days;"
+					local query_current = "SELECT * FROM current;"
+					local result_days = selectDB(query_days)
+					local result_current = selectDB(query_current)
+					
+					--Patikrinam ar lenteles egzistuoja
+					if result_days  or (result_current and period == "day") then
+						sim = get_sim()
+						local total_data
+						local total
+						local last_time
+						local result
+						local query
+						local data
+						--debug(daemon, "Down connection enabled: " ..enb_conn)
+						
+						--Konekcijos atjungimo salyga-------------------------------------
+						if enb_conn == "1" then
+							debug(daemon, "Down connection enabled")
+							total = 0
+							last_time = 0
+							data = {start_day = conn_start_day, start_weekday = conn_start_weekday, start_hour = conn_start_hour}
+							local conn_timeInterval = time_interval(conn_period, data)
+							query = string.format("SELECT * FROM %s WHERE sim='%s' ORDER BY ROWID DESC LIMIT 1;", tables.guard, sim)
+							result = selectDB(query)
+							--Surenkam duomenis is apie paskutini konekcijos nutaukima
+							if result then
+								total = result[1].lmt
+								last_time = result[1].time
+							end
+							---Patikrinam ar nebuvo nutraukta konekcija ir nesibaige nutraukimo periodas.
+							---Patikrinam ar nebuvo padidintas limitas
+							debug(daemon, "Last connection down inf: Time (" ..os.date("%c", last_time).. "), (" ..last_time.."), Data limit "..conn_limit..", Data used "..total)
+							if (last_time <= conn_timeInterval.start or conn_limit > total) then
+								--Skaiciuojam sim (1 arba 0) duomenu kieki nustatytame periode
+								total_data = get_data(conn_period, conn_timeInterval, sim)
+
+								--Jei limitas virsytas isjungiam konekcija, srba atvirksciai.
+								if total_data then
+									debug(daemon, "Data limit: " ..conn_limit.. ", SIM " ..sim.. " Data used: " ..total_data)
+									if conn_limit <= total_data then
+										legalized = false
+										down_connection(total_data, true)
+									elseif not legalized then
+										legalized = true
+										legalize_it()
+									end
+								end
+							--Jei duomenu limitas virsytas, pirmo starto metu nutraukiame konekcija 	
+							elseif first_start then 
+								down_connection(total, false)
+								first_start = false
+							end
+						elseif first_start then
+							first_start = false
+							legalize_it()
+						end
+						
+						--SMS perspejimo siuntimo salyga-------------------------------------
+-- 						debug(daemon, "SMS warrning enabled: " ..enb_wrn)
+						if enb_wrn == "1" then
+							debug(daemon, "SMS warrning enabled")
+							data = {start_day = wrn_start_day, start_weekday = wrn_start_weekday, start_hour = wrn_start_hour}
+							local wrn_timeInterval = time_interval(wrn_period, data)
+							total = 0
+							last_time = 0
+							query = string.format("SELECT * FROM %s WHERE sim='%s' ORDER BY ROWID DESC LIMIT 1;", tables.sms, sim)
+							result = selectDB(query)
+							--Surenkam duomenis is apie paskutini sms perspejima
+							if result then
+								total = result[1].lmt
+								last_time = result[1].time 
+							end
+							debug(daemon, "Last sms warrning inf: Time (" ..os.date("%c", last_time).. "), (" ..last_time.."), Data limit "..wrn_limit..", Data used "..total)
+							if (last_time <= wrn_timeInterval.start or wrn_limit > total) then
+								--Skaiciuojam duomenu kieki nustatytame periode
+								total_data = get_data(wrn_period, wrn_timeInterval, sim)
+
+								--Jei limitas virsytas isjungiam konekcija, srba atvirksciai.
+								if total_data then
+									local routername = getParam("uci get -q system.system.routername")
+									if routername == null then
+										routername = "RutXXX";
+									end
+									debug(daemon, "SMS wrn. data limit: " ..wrn_limit.. ", data used: " ..total_data)
+									message = "Warning! Your router named: ".. routername .." has reached your set 3G data limit. Total data: "..total_data.." Mb."
+									
+									if wrn_limit <= total_data and wrn_number then
+										debug(daemon, "sending alert event SMS\n")
+										debug(daemon, "Sending message: "..message..", to number: "..wrn_number)
+										sms_send(message, wrn_number, total_data)
+									end
+								end
+							end
+						end
+						--Monitorinimo serverio perspejimas apie ivykusi alerta----------------------------
+						debug(daemon, "Siuntimas Monitorinimo serveriui !!!")
+						if enb_wrn == "1" then
+							debug(daemon, "monitoring warrning enabled")
+							data = {start_day = wrn_start_day, start_weekday = wrn_start_weekday, start_hour = wrn_start_hour}
+							local wrn_timeInterval = time_interval(wrn_period, data)
+							--Skaiciuojam duomenu kieki nustatytame periode
+							total_data = get_data(wrn_period, wrn_timeInterval, sim)
+	
+							--Jei limitas virsytas isjungiam konekcija, srba atvirksciai.
+								if total_data then
+									local routername = getParam("uci get -q system.system.routername")
+									if routername == null then
+										routername = "RutXXX";
+									end
+
+									if wrn_limit <= total_data then
+									
+									debug(daemon, "limit reached, sending to monitoring server\n")
+									
+										if sim == "0" then
+											reported = uci:get("data_limit", "limit", "sec_reported")
+										else
+											reported = uci:get("data_limit", "limit", "prim_reported")
+										end
+										
+										if reported == null then
+											reported = '0';
+										end
+										if reported == '0' then
+											debug(daemon, "actually sending data to server\n")
+											local sim_used = get_sim();
+											if sim_used == "1" then
+												os.execute("/usr/sbin/monitoring_alert_sender.sh 'sendSMS' 'Mobile data' 'SIM1' &")
+											else
+												os.execute("/usr/sbin/monitoring_alert_sender.sh 'sendSMS' 'Mobile data' 'SIM2' &")
+											end
+											if sim == "0" then
+												uci:set("data_limit", "limit", "sec_reported", "1");
+											else
+												uci:set("data_limit", "limit", "prim_reported", "1");
+											end
+											uci:commit("data_limit")
+										else
+											debug(daemon, "not doing anything, notification already sent to server\n")
+										end
+										
+									end
+								end
+						end
+					else
+						debug(daemon, "Table is empty.")
+					end
+					debug(daemon, "Runing...")
+					debug(daemon, "______________________________________")
+					closeDB()
+				else
+					debug(daemon, "No database: " ..dbFullPath)
+				end
+			else
+				debug(daemon, "Can't run ".. daemon ..". ".. counter .." is not started or /var/run/"..counter_pidName .." is not presented.")
+				--os.execute("/etc/init.d/mdcollectd start")
+			end
+			
+			sleep(interval)
+		end
+	end
+end
+
+function status()
+	if fileExists(pidPath, pidName) then
+		local pid = readFile(pidFullPath)
+		local epid = tonumber(getParam(getPID))
+		if pid == epid then
+			debug(daemon, daemon .." is running.")
+		else
+			debug(daemon, pidFullPath .." is present, but no running processes by ".. daemon .." was found. Maybe you need to remove ".. pidFullPath .." file.")
+		end
+	else
+		debug(daemon, daemon .." is stopped.")
+	end
+end
+
+function stop()
+	if fileExists(pidPath, pidName) then
+		--Jei isjungineja, o ne keicia konfiguracija, tada sugrazinam konekcija
+		if enb_conn ~= "1" and enb_wrn ~= "1" then
+			legalize_it()
+		end
+		debug(daemon, "stopping ".. daemon .."...")
+		local pid = readFile(pidFullPath)
+
+		if pid then
+			debug(daemon, "Stoping proces pid: " ..pid)
+			local kill = os.execute(string.format("kill %d", pid))
+			local rm = os.execute(string.format("rm %s", pidFullPath))
+			if kill and rm then
+				debug(daemon, daemon .." succesfully stopped.")
+			end
+		else
+			debug(daemon, daemon .." could not be stopped.")
+		end
+	else
+		debug(daemon, daemon .." is already stopped.")
+	end
+end
+
+--
+-- Program execution
+--
+if #arg > 0 and #arg < 2 then
+	if arg[1] == "start" then start()
+	elseif arg[1] == "stop" then stop()
+	elseif arg[1] == "restart" then stop() start()
+	else
+		local out =
+[[unknown command line argument.
+
+usage:
+	start
+	stop
+	restart
+]]
+		print(out)
+	end
+else
+	print("------------------------------------------------\n----Limit inspector-----------------------------\n------------------------------------------------\n")
+	status()
+end

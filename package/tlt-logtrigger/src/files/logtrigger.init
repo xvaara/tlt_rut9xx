@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2015 Teltonika
+
+USE_PROCD=1
+START=18
+STOP=98
+
+. /lib/functions.sh
+
+CONFIG="logtrigger"
+BIN="logtrigger"
+DIR=/usr/bin/
+ENABLED=0
+UNTIL_REBOOT=0
+
+boot() {
+	config_load "logtrigger"
+	config_foreach reboot_enabled "rule"
+	# Delete blocked IP list on reboot
+	[ $UNTIL_REBOOT -eq 1 ] && echo "" > /etc/config/blocklist
+	start
+}
+
+rule_enabled() {
+	local enabled
+	config_get enabled $1 "enabled" "0"
+	[ "$enabled" == "1" ] && ENABLED=1
+}
+reboot_enabled() {
+	local until_reboot
+	config_get until_reboot $1 "until_reboot" "0"
+	[ "$until_reboot" == "1" ] && UNTIL_REBOOT=1
+}
+
+start_service() {
+	config_load $CONFIG
+	config_foreach rule_enabled "rule"
+
+	[ $ENABLED -eq 1 ] || return
+	procd_open_instance
+	procd_set_param command $DIR$BIN
+	procd_set_param respawn
+	procd_close_instance
+}
+service_triggers()
+{
+	procd_add_reload_trigger "$CONFIG"
+}
+# stop_service() {
+#	killall logtrigger
+# }

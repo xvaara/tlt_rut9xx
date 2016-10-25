@@ -1,0 +1,131 @@
+#!/bin/sh /etc/rc.common
+# Upload file to FTP server
+
+START=99
+STOP=56
+CONFIG_GET="uci get coovachilli.ftp"
+APP_NAME="ftp_upload_log"
+#CONFIG_LOG_GET="uci get coovachilli.logging"
+PIPE="/tmp/pipe_log"
+WIFI_LOG="/tmp/wifitracker.log"
+LOG_TO_PIPE="/sbin/log_to_pipe.sh"
+WIFITRACKER="/sbin/wifitracker.sh"
+
+LOGGER="logger -p 5 -t $APP_NAME -s"
+
+script_log_run()
+{
+	$LOG_TO_PIPE $PIPE &
+	iptables -I forwarding_rule -p tcp --dport 80  -m limit --limit 1/s -j LOG --log-level 7
+	iptables -I forwarding_rule -p tcp --dport 443 -m limit --limit 1/s -j LOG --log-level 7
+	iptables -I forwarding_rule -p tcp --dport 21  -m limit --limit 1/s -j LOG --log-level 7
+	$WIFITRACKER $PIPE /tmp/wifitracker.log 1 &
+}
+
+script_run()
+{
+	HOST=`$CONFIG_GET.host 2> /dev/null`
+	#SOURCE_NAME=`$CONFIG_GET.sname 2> /dev/null`
+	#DEST_NAME=`$CONFIG_GET.dname 2> /dev/null`
+
+	if [ -z $HOST ]; then
+		$LOGGER "No FTP host provided"
+	fi
+
+	#if [ -z $SOURCE_NAME ]; then
+	#	$LOGGER "No source file name provided"
+	#	exit 1
+	#fi
+
+	#if [ -z $DEST_NAME ]; then
+	#	$LOGGER "No destination file name provided"
+	#	exit 1
+	#fi
+
+	config_load coovachilli
+	sed -i "/ftp_upload/d" /etc/crontabs/root
+	config_foreach set_interval interval
+}
+
+set_interval()
+{
+	local fixed minutes hours weekday intervar
+
+	local cfg="$1"
+	config_get fixed	"$cfg" fixed		""
+	config_get minutes	"$cfg" fixed_minute	""
+	config_get hours	"$cfg" fixed_hour	""
+	config_get weekday	"$cfg" weekdays		"*"
+	config_get interval	"$cfg" interval_time	""
+
+	#echo "fixed: $fixed, minutes: $minutes, hours: $hours, weekday: $weekday, interval: $interval"
+
+	if [ $fixed -eq "0" ]; then
+		#Interval
+
+		minutes=0
+
+		if [[ $interval -eq "1" || \
+			$interval -eq "2" || \
+			$interval -eq "4" || \
+			$interval -eq "8" || \
+			$interval -eq "12" ]]; then
+			hours="*/$interval"
+		else
+			if [ $interval -eq "24" ]; then
+				hours="1"
+			else
+				hours="*/1"
+			fi
+		fi
+	else
+		#Fixed times once a day
+
+		minutes=$minutes
+
+		if [ $hours -gt "23" ]; then
+			hours="0"
+		fi
+		hours=$hours
+	fi
+
+	echo "$minutes $hours * * ""$weekday"" sh /sbin/ftp_upload.sh" >> /etc/crontabs/root
+}
+
+start()
+{
+	if [ ! -e /etc/rc.d/S99chilli -a ! -e /etc/rc.d/K56chilli ]; then
+		/etc/init.d/chilli enable
+	fi
+	#if [ `$CONFIG_LOG_GET.enabled 2> /dev/null` -eq "1" ] ; then
+	#fi
+	if [ `$CONFIG_GET.enabled 2> /dev/null` -eq "1" ] ; then
+		script_log_run
+		script_run
+	fi
+}
+
+stop()
+{
+	cat /etc/crontabs/root | grep ftp_upload >/dev/null 2>/dev/null
+	if [ $? -eq 0 ]; then
+		sed -i "/ftp_upload/d" /etc/crontabs/root >/dev/null 2>/dev/null
+		killall -9 log_to_pipe.sh >/dev/null 2>/dev/null
+		killall -9 wifitracker.sh >/dev/null 2>/dev/null
+		iptables -D forwarding_rule -p tcp --dport 80  -m limit --limit 1/s -j LOG --log-level 7
+		iptables -D forwarding_rule -p tcp --dport 443 -m limit --limit 1/s -j LOG --log-level 7
+		iptables -D forwarding_rule -p tcp --dport 21  -m limit --limit 1/s -j LOG --log-level 7
+	fi
+}
+
+restart()
+{
+	stop
+	start
+}
+
+reload()
+{
+	restart
+}
+

@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+
+USE_PROCD=1
+START=75
+STOP=55
+
+
+
+local enabled=`uci -q get smpp_config.smpp.enabled`
+local username=`uci -q get smpp_config.smpp.username`
+local password=`uci -q get smpp_config.smpp.password`
+local port=`uci -q get smpp_config.smpp.port`
+command_line="/usr/sbin/smpp $username $password $port 0"
+
+start_service() {
+
+if [ $enabled == '1' ]; then
+	procd_open_instance
+	procd_set_param command $command_line
+	procd_close_instance
+fi
+
+}
+
+service_triggers()
+{
+	procd_add_reload_trigger "smpp"
+}

@@ -1,0 +1,71 @@
+	<%- if pageaction then -%>
+	<div class="cbi-page-actions">
+		<%if wizStep then%>
+			<%if wizStep == 1 then %>
+			<div style="height: 0px;">
+				<input class="cbi-button cbi-button-reset" type="submit" name="cbi.wizard.skip" value="<%=translate("Skip Wizard")%>" />
+				<input class="cbi-button cbi-button-apply" type="submit" name="cbi.wizard.next" value="<%=translate("Save")%>" />
+			</div>
+			<%elseif wizStep == 2 then%>
+			<div style="height: 0px;">
+				<input class="cbi-button cbi-button-reset" type="submit" name="cbi.wizard.skip" value="<%=translate("Skip Wizard")%>" />
+				<input class="cbi-button cbi-button-apply" type="submit" name="cbi.wizard.next" value="<%=translate("Save")%>" />
+			</div>
+			<%elseif wizStep == 3 then%>
+			<div style="height: 0px;">
+				<input class="cbi-button cbi-button-reset" type="submit" name="cbi.wizard.skip" value="<%=translate("Skip Wizard")%>" />
+				<input class="cbi-button cbi-button-apply" type="button" onClick="Check_flag_function();" id="special_submit_button" name="cbi.wizard.next" value="<%=translate("Save")%>" />
+			<script type="text/javascript">
+				function Check_flag_function() {
+					returnvalue_flag=cfgwzd_lan('<%=luci.dispatcher.build_url('admin', 'system', 'wizard', 'change_lan')%>');
+					if (returnvalue_flag==true){
+						document.getElementById("special_submit_button").disabled=true;
+					}
+				}
+			</script>
+			</div>
+			<%elseif wizStep == 99 then%>
+			<div style="height: 0px;">
+				<input class="cbi-button cbi-button-reset" type="submit" name="cbi.wizard.skip" value="<%=translate("Skip Wizard")%>" />
+				<input class="cbi-button cbi-button-save" type="submit" name="cbi.wizard.finish" value="<%=translate("Save")%>" />
+				<!--<input class="cbi-button cbi-button-apply" type="submit" name="cbi.apply" value="<%:Save & Apply%>" />-->
+			</div>
+			<%elseif wizStep == 5 then%>
+			<div style="height: 0px;">
+				<input class="cbi-button cbi-button-apply" type="submit" name="cbi.apply" value="<%=translate("Save")%>" />
+				<script type="text/javascript">
+					lan_new_url('<%=luci.dispatcher.build_url('admin', 'network', 'lan')%>');
+				</script>
+			</div>
+			<% end %>
+		<% else %>
+			<% if redirect then %>
+			<div style="float:left">
+				<input class="cbi-button cbi-button-link" type="button" value="<%=translate("Back to Overview")%>" onclick="location.href='<%=pcdata(redirect)%>'" />
+			</div>
+			<% end %>
+
+			<% if flow.skip then %>
+				<input class="cbi-button cbi-button-skip" type="submit" name="cbi.skip" value="<%=translate("Skip")%>" />
+			<% end %>
+
+			<% if refreshpage then %>
+				<button id="refreshbutton" class="cbi-button-refresh"  style="float: right;" onClick="cbi_d_refresh_page('refreshbutton')"><%=refreshpage%></button>
+				<!--<input class="cbi-button cbi-button-refresh" id="refreshbutton" type="button" value="<%=refreshpage%>" onclick="cbi_d_refresh_page('refreshbutton')" /> -->
+			<% elseif not autoapply then %>
+				<input class="cbi-button cbi-button-apply" type="submit" name="cbi.apply" value="<%=translate("Save")%>" />
+			<% else%>
+				<input class="cbi-button cbi-button-save" type="submit" value="<%=translate("Save")%>" />
+			<% end %>
+			<!--<input class="cbi-button cbi-button-reset" type="reset" value="<%=translate("Reset")%>" />-->
+		<% end %>
+	</div>
+	<%- end -%>
+	<script type="text/javascript">cbi_d_update();</script>
+</form>
+	<%- if disclaimer_msg then -%>
+		<div class="disclaimer_msg">
+			<span>* <%=translate("Your carrier\'s data usage accounting may differ. Teltonika is not liable should any accounting discrepancies occur.")%></span>
+		</div>
+	<%- end -%>
+<%+footer%>

@@ -1,0 +1,24 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+
+<svg width="100%" height="100%" version="1.1" xmlns="http://www.w3.org/2000/svg">
+	<line x1="0" y1="25%" x2="100%" y2="25%" style="stroke:black;stroke-width:0.1" />
+	<text id="label_75" x="20" y="24%" style="fill:#999999; font-size:9pt"> </text>
+
+	<line x1="0" y1="50%" x2="100%" y2="50%" style="stroke:black;stroke-width:0.1" />
+	<text id="label_50" x="20" y="49%" style="fill:#999999; font-size:9pt"> </text>
+
+	<line x1="0" y1="75%" x2="100%" y2="75%" style="stroke:black;stroke-width:0.1" />
+	<text id="label_25" x="20" y="74%" style="fill:#999999; font-size:9pt"> </text>
+
+	<polyline id="load01" points="" style="fill:#FF0000;fill-opacity:0.4;stroke:#FF0000;stroke-width:1" />
+	<polyline id="load05" points="" style="fill:#FF6600;fill-opacity:0.4;stroke:#FF6600;stroke-width:1" />
+	<polyline id="load15" points="" style="fill:#FF00FF;fill-opacity:0.4;stroke:#FF00FF;stroke-width:1" />
+	<polyline id="load20" points="" style="fill:#003366;fill-opacity:0.4;stroke:#003366;stroke-width:1" />
+	<polyline id="load25" points="" style="fill:#669999;fill-opacity:0.4;stroke:#669999;stroke-width:1" />
+	<polyline id="load30" points="" style="fill:#003300;fill-opacity:0.4;stroke:#003300;stroke-width:1" />
+	<polyline id="load35" points="" style="fill:#663300;fill-opacity:0.4;stroke:#663300;stroke-width:1" />
+	<polyline id="load40" points="" style="fill:#660066;fill-opacity:0.4;stroke:#660066;stroke-width:1" />
+	<polyline id="load45" points="" style="fill:#CCFF33;fill-opacity:0.4;stroke:#CCFF33;stroke-width:1" />
+	<polyline id="load50" points="" style="fill:#00FF00;fill-opacity:0.4;stroke:#00FF00;stroke-width:1" />
+</svg>

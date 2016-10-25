@@ -1,0 +1,62 @@
+--- a/vrrpd.c
++++ b/vrrpd.c
+@@ -46,6 +46,7 @@
+ static vrrp_rt	glob_vsrv;	/* a global because used in the signal handler*/
+ /* Scott added 9-4-02 */
+ int master_ipaddr = 0;
++int daemonize = 0;
+ 
+ static char	PidDir[FILENAME_MAX+1];
+ 
+@@ -675,6 +676,7 @@
+ 							, VRRP_PIDDIR_DFL );
+ 	fprintf( stderr, "  -d delay : Set the advertisement interval (in sec) (dfl: %d)\n"
+ 							, VRRP_ADVER_DFL );
++	fprintf( stderr, "  -r       : Run as deamon\n");
+ 	fprintf( stderr, "  ipaddr   : the ip address(es) of the virtual server\n" );
+ }
+ 
+@@ -739,7 +741,7 @@
+ 	vrrp_if *vif = &vsrv->vif;
+ 	int	c;
+ 	while( 1 ){
+-		c = getopt( argc, argv, "f:si:v:a:p:d:hn" );
++		c = getopt( argc, argv, "f:si:v:a:p:d:hnr" );
+ 		/* if the parsing is completed, exit */
+ 		if( c == EOF )	break;
+ 		switch( c ){
+@@ -802,6 +804,9 @@
+ 			}
+ 			vsrv->adver_int *= VRRP_TIMER_HZ;
+ 			break;
++		case 'r':
++			daemonize	= 1;
++			break;
+ 		case 'h':
+ 			usage();
+ 			exit( 1 );			break;
+@@ -1190,10 +1195,6 @@
+ 	setbuf(stderr,NULL);
+ #endif
+ 	
+-	// First we fork and kill our parent
+-	if (fork())
+-		exit(0);
+-	
+ 	vrrpd_log(LOG_WARNING, "vrrpd version %s starting...\n", VRRPD_VERSION);
+ 
+ 	snprintf( PidDir, sizeof(PidDir), "%s", VRRP_PIDDIR_DFL );
+@@ -1204,6 +1205,13 @@
+ 	if( argc < 0 ) {
+ 		return -1;
+ 	}
++	
++	if (daemonize == 1) {
++		// First we fork and kill our parent
++		if (fork())
++			exit(0);
++	}
++	
+ 	/* add the virtual server ip */
+ 	for( ; argv[argc]; argc++ ){
+ 		uint32_t ipaddr = inet_addr( argv[argc] );
